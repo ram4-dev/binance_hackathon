@@ -1,11 +1,24 @@
 import type { LanguageModel } from 'ai';
+import {
+  canonicalizeBinancePreview,
+  createBinanceToolsFromEnv,
+  type BinanceOrderInput,
+  type BinanceTransferInput,
+} from '../agent/binance-definition.js';
 import { handleMessage, type HandleMessageOptions } from '../agent/wallet-agent.js';
 import {
   canonicalizeTransferPreview,
   type SendTokenInput,
+  type WalletAgentContext,
 } from '../agent/definition.js';
 import { getWalletAgentConfig } from '../agent/instructions.js';
-import type { ConversationTurnResult, PendingTransfer } from '../contracts/http.js';
+    import {
+          isBinancePendingTransfer,
+          isBinanceTransferPreview,
+          type BinancePendingTransfer,
+          type ConversationTurnResult,
+          type PendingTransfer,
+        } from '../contracts/http.js';
 import { appendMessage, type ConversationSession } from './session-state.js';
 import { errorFromCode, safeErrorMessage, type ConversationErrorCode } from './errors.js';
 import type { ConversationRepository } from './repository.js';
@@ -50,8 +63,10 @@ export type PersistNativeToolStateInput = {
   session: ConversationSession;
 };
 
+export type NativePreviewInput = SendTokenInput | BinanceOrderInput | BinanceTransferInput;
+
 export type PersistNativePreviewInput = PersistNativeToolStateInput & {
-  input: SendTokenInput;
+  input: NativePreviewInput;
   output: unknown;
 };
 
@@ -229,10 +244,15 @@ export function createWalletConversationService(dependencies: WalletConversation
         label: 'Transfer preview ready for confirmation',
       });
       yield* emit(stateEvent(withProgress));
-      yield* emitSpoken(
-        narrateFinancialFact({ language: withProgress.language, phase: 'awaiting_confirmation', amount: result.preview.amount, token: result.preview.token }),
-        'decision',
-      );
+          yield* emitSpoken(
+            narrateFinancialFact({
+              language: withProgress.language,
+              phase: 'awaiting_confirmation',
+              amount: isBinanceTransferPreview(result.preview) ? result.preview.value : result.preview.amount,
+              token: isBinanceTransferPreview(result.preview) ? result.preview.symbol : result.preview.token,
+            }),
+            'decision',
+          );
     } else {
       yield* emit(stateEvent(visible));
       yield* emitSpoken(spokenResultMessage(result, visible.language), result.status === 'error' ? 'uncertain' : 'answer');
@@ -339,15 +359,20 @@ export function createWalletConversationService(dependencies: WalletConversation
     yield current;
   }
 
-  async function runFinancialTransfer(input: {
-    conversationId: string;
-    userId: string;
-    previewId: string;
-    claimed: PendingTransfer & { previewId: string };
-    snapshot: ConversationSnapshot;
-  }): Promise<ConversationTurnResult> {
-    const { conversationId, userId, claimed, snapshot } = input;
-    const transfer = toTransferRequest(claimed);
+      async function runFinancialTransfer(input: {
+        conversationId: string;
+        userId: string;
+        previewId: string;
+        claimed: PendingTransfer & { previewId: string };
+        snapshot: ConversationSnapshot;
+      }): Promise<ConversationTurnResult> {
+        const { conversationId, userId, claimed, snapshot } = input;
+
+        if (isBinancePendingTransfer(claimed)) {
+          return runConfirmedBinance({ conversationId, userId, claimed, snapshot });
+        }
+
+        const transfer = toTransferRequest(claimed);
     const policyError = validateWalletTransferPolicy({ ...transfer, dryRun: false }, getWalletAgentConfig());
     const recipientValid = await isClaimedRecipientValid(claimed, dependencies.memory);
     if (policyError || !recipientValid) {
@@ -421,12 +446,85 @@ export function createWalletConversationService(dependencies: WalletConversation
     const result = errorResult(errorFromCode(code));
     await appendServiceMessage(snapshot, userId, result.message, dependencies.conversations);
     const failed = await setProgress(await dependencies.conversations.get(userId, conversationId) ?? snapshot, { phase: 'failed', transactionHash: transaction.transactionHash, label: result.message });
-    await publish(stateEvent(failed));
-    await publishSpoken(spokenResultMessage(result, failed.language), 'result');
-    return result;
-  }
+        await publish(stateEvent(failed));
+        await publishSpoken(spokenResultMessage(result, failed.language), 'result');
+        return result;
+      }
 
-  async function publishSpoken(text: string, reason: 'started' | 'delayed' | 'decision' | 'result' | 'answer' | 'uncertain'): Promise<void> {
+      /**
+       * Executes a confirmed Binance operation (order or internal transfer) that
+       * already has a previewed, user-confirmed pending transfer. This mirrors
+       * handleMessage's executeConfirmedBinance in src/agent/wallet-agent.ts: it
+       * invokes the Binance tool with dryRun=false so the policy is re-checked at
+       * execution time, and a policy hold is reported as binance_policy_hold, never
+       * as a success.
+       */
+      async function runConfirmedBinance(input: {
+        conversationId: string;
+        userId: string;
+        claimed: BinancePendingTransfer & { previewId: string };
+        snapshot: ConversationSnapshot;
+      }): Promise<ConversationTurnResult> {
+        const { conversationId, userId, claimed, snapshot } = input;
+        const toolName = claimed.operation === 'order' ? 'place_binance_order' : 'binance_internal_transfer';
+        const binanceTool = createBinanceToolsFromEnv().find((definitionTool) => definitionTool.name === toolName);
+        if (!binanceTool) {
+          await dependencies.conversations.releasePendingTransferClaim(userId, conversationId);
+          const result = errorResult(errorFromCode('wallet_unavailable'));
+          await appendServiceMessage(snapshot, userId, result.message, dependencies.conversations);
+          const updated = await dependencies.conversations.get(userId, conversationId) ?? snapshot;
+          await publish(stateEvent(updated));
+          await publishSpoken(spokenResultMessage(result, updated.language), 'result');
+          return result;
+        }
+
+        const context: WalletAgentContext = {
+          conversationId,
+          userId,
+          language: snapshot.language,
+          config: getWalletAgentConfig(),
+          session: snapshot,
+          wallet: dependencies.wallet,
+          ...(dependencies.memory ? { recipientMemory: dependencies.memory } : {}),
+        };
+
+        let output: unknown;
+        try {
+          output = await binanceTool.execute({ ...claimed.request, dryRun: false }, context);
+        } catch {
+          await dependencies.conversations.markPendingTransferUncertain(userId, conversationId);
+          const result = errorResult(errorFromCode('broadcast_uncertain'));
+          await appendServiceMessage(snapshot, userId, result.message, dependencies.conversations);
+          const uncertain = await setProgress(await dependencies.conversations.get(userId, conversationId) ?? snapshot, { phase: 'uncertain', label: result.message });
+          await publish(stateEvent(uncertain));
+          await publishSpoken(spokenResultMessage(result, uncertain.language), 'uncertain');
+          return result;
+        }
+
+        const hold = isBinancePolicyHold(output);
+        if (hold) {
+          await dependencies.conversations.clearPendingTransfer(userId, conversationId);
+          const result: ConversationTurnResult = { status: 'error', code: 'binance_policy_hold', message: hold.message };
+          await appendServiceMessage(snapshot, userId, hold.message, dependencies.conversations);
+          const updated = await dependencies.conversations.get(userId, conversationId) ?? snapshot;
+          await publish(stateEvent(updated));
+          await publishSpoken(spokenResultMessage(result, updated.language), 'answer');
+          return result;
+        }
+
+        await dependencies.conversations.clearPendingTransfer(userId, conversationId);
+        const result: ConversationTurnResult = {
+          status: 'sent',
+          message: claimed.operation === 'order' ? 'Binance order executed.' : 'Binance transfer completed.',
+        };
+        await appendServiceMessage(snapshot, userId, result.message, dependencies.conversations);
+        const updated = await dependencies.conversations.get(userId, conversationId) ?? snapshot;
+        await publish(stateEvent(updated));
+        await publishSpoken(spokenResultMessage(result, updated.language), 'result');
+        return result;
+      }
+
+      async function publishSpoken(text: string, reason: 'started' | 'delayed' | 'decision' | 'result' | 'answer' | 'uncertain'): Promise<void> {
     const input = { reason, text };
     if (!narration.shouldNarrate(input)) return;
     narration.remember(input);
@@ -435,11 +533,13 @@ export function createWalletConversationService(dependencies: WalletConversation
 
   function resultFromFinancialState(snapshot: ConversationSnapshot): ConversationTurnResult {
     if (snapshot.progress?.phase === 'completed' && snapshot.lastTransactionHash) {
-      const transaction = snapshot.transaction ?? {
-        network: snapshot.pendingTransfer?.network ?? 'sepolia',
-        transactionHash: snapshot.lastTransactionHash,
-        explorerUrl: `https://sepolia.etherscan.io/tx/${snapshot.lastTransactionHash}`,
-      };
+          const transaction = snapshot.transaction ?? {
+            network: snapshot.pendingTransfer && !isBinancePendingTransfer(snapshot.pendingTransfer)
+              ? snapshot.pendingTransfer.network
+              : 'sepolia',
+            transactionHash: snapshot.lastTransactionHash,
+            explorerUrl: `https://sepolia.etherscan.io/tx/${snapshot.lastTransactionHash}`,
+          };
       return { status: 'sent', message: 'Transfer confirmed.', transaction };
     }
     if (snapshot.progress?.phase === 'uncertain') return errorResult(errorFromCode('broadcast_uncertain'));
@@ -492,7 +592,41 @@ export function createWalletConversationService(dependencies: WalletConversation
       };
     }
     if (isToolError(input.output)) return input.output;
-    const preview = canonicalizeTransferPreview(input.input, input.output);
+
+    const binancePreview = canonicalizeBinancePreview(input.output);
+    if (binancePreview) {
+      const binanceInput = input.input as BinanceOrderInput | BinanceTransferInput;
+      const operation = 'side' in binanceInput ? 'order' : 'internal_transfer';
+      const persisted = await dependencies.conversations.saveSnapshot(
+        input.userId,
+        {
+          ...snapshot,
+          recipientMemory: input.session.recipientMemory,
+          pendingTransfer: {
+            venue: 'binance',
+            operation,
+            preview: binancePreview,
+            idempotencyKey: binanceInput.idempotencyKey,
+            request: binanceInput as Record<string, unknown>,
+          },
+          progress: {
+            phase: 'awaiting_confirmation',
+            label: 'Binance preview ready for confirmation',
+          },
+        },
+        snapshot.messages.length,
+      );
+      await publish(stateEvent(persisted));
+      return {
+        status: 'preview_created',
+        preview: binancePreview,
+        previewId: persisted.pendingTransfer?.previewId,
+        revision: persisted.revision,
+      };
+    }
+
+    const walletInput = input.input as SendTokenInput;
+    const preview = canonicalizeTransferPreview(walletInput, input.output);
     if (!preview) {
       return {
         status: 'error',
@@ -507,11 +641,11 @@ export function createWalletConversationService(dependencies: WalletConversation
         ...snapshot,
         recipientMemory: input.session.recipientMemory,
         pendingTransfer: {
-          network: input.input.network,
-          token: input.input.token,
-          to: input.input.to,
-          amount: input.input.amount,
-          wallet: input.input.wallet,
+          network: walletInput.network,
+          token: walletInput.token,
+          to: walletInput.to,
+          amount: walletInput.amount,
+          wallet: walletInput.wallet,
           preview,
           ...(selected
             ? {
@@ -708,6 +842,7 @@ function sanitizeResult(result: ConversationTurnResult): ConversationTurnResult 
   const supported = new Set<ConversationErrorCode>([
     'conversation_not_found', 'conversation_forbidden', 'stale_revision', 'pending_confirmation',
     'no_pending_preview', 'stale_preview', 'recipient_revalidation_required', 'policy_rejected',
+    'binance_policy_hold',
     'broadcast_in_progress', 'broadcast_uncertain', 'transaction_receipt_invalid', 'transfer_reverted',
     'invalid_tool_result', 'wallet_unavailable', 'internal_error',
   ]);
@@ -725,6 +860,17 @@ function isToolError(output: unknown): output is Record<string, unknown> {
   );
 }
 
+/** True when a Binance tool output is a policy hold (never a success). */
+function isBinancePolicyHold(output: unknown): { message: string } | null {
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    const candidate = output as Record<string, unknown>;
+    if (candidate.error === 'policy_hold' && typeof candidate.message === 'string') {
+      return { message: candidate.message };
+    }
+  }
+  return null;
+}
+
 async function* completedError(input: HandleTurnInput, code: ConversationErrorCode): AsyncIterable<ConversationEvent> {
   const result = errorResult(errorFromCode(code));
   yield { type: 'spoken-segment', id: crypto.randomUUID(), text: result.message, reason: 'answer' };
@@ -732,6 +878,9 @@ async function* completedError(input: HandleTurnInput, code: ConversationErrorCo
 }
 
 function toTransferRequest(transfer: PendingTransfer): TransferRequest {
+  if (isBinancePendingTransfer(transfer)) {
+    throw new Error('Binance operations are not wallet transfers.');
+  }
   return {
     network: transfer.network,
     token: transfer.token,
@@ -740,8 +889,9 @@ function toTransferRequest(transfer: PendingTransfer): TransferRequest {
     wallet: transfer.wallet,
   };
 }
-
+    
 async function isClaimedRecipientValid(transfer: PendingTransfer, memory?: RecipientMemoryRuntime): Promise<boolean> {
+  if (isBinancePendingTransfer(transfer)) return true;
   if (!transfer.recipientId || transfer.recipientVersion === undefined) return true;
   if (!memory) return false;
   const current = await memory.service.getRecipientForVersion(memory.userId, transfer.recipientId, transfer.recipientVersion);

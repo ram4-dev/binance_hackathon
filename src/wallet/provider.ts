@@ -1,4 +1,4 @@
-import type { PendingTransfer, TransactionResult, TransferPreview } from '../contracts/http.js';
+import type { TransactionResult, WalletPendingTransfer, WalletTransferPreview } from '../contracts/http.js';
 
 export type WalletContext = { wallet: string; network: string };
 export type WalletProviderHealth = {
@@ -25,7 +25,7 @@ export type FinalityOutcome = {
 export type FinalityRequest =
   | TransactionResult
   | { transaction: TransactionResult; signal?: AbortSignal };
-export type TransferRequest = Omit<PendingTransfer, 'preview'>;
+export type TransferRequest = Omit<WalletPendingTransfer, 'preview'>;
 
 export interface WalletProvider {
   readonly id: string;
@@ -36,7 +36,7 @@ export interface WalletProvider {
   getAddress(context: WalletContext): Promise<WalletAddress>;
   getBalance(query: WalletBalanceQuery): Promise<WalletBalance>;
   getHistory(query: WalletHistoryQuery): Promise<WalletHistory>;
-  previewTransfer(request: TransferRequest): Promise<TransferPreview>;
+  previewTransfer(request: TransferRequest): Promise<WalletTransferPreview>;
   broadcastTransfer(request: TransferRequest): Promise<BroadcastOutcome>;
   waitForFinality(request: FinalityRequest, signal?: AbortSignal): Promise<FinalityOutcome>;
   close(): Promise<void>;

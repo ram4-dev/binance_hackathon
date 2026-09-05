@@ -1,4 +1,5 @@
 import type { ConversationSnapshot } from './types.js';
+import { isBinancePendingTransfer } from '../contracts/http.js';
 
 export type ConversationSummary = {
   language: 'es' | 'en';
@@ -135,11 +136,12 @@ export function buildConversationSummary(snapshot: ConversationSnapshot): Conver
     .filter((message) => message.role === 'assistant')
     .map((message) => typeof message.content === 'string' ? message.content.trim() : '')
     .filter(Boolean);
-  const recipient = snapshot.pendingTransfer?.recipientId && snapshot.pendingTransfer.recipientVersion
+  const pending = snapshot.pendingTransfer;
+  const recipient = pending && !isBinancePendingTransfer(pending) && pending.recipientId && pending.recipientVersion
     ? [{
-        recipientId: snapshot.pendingTransfer.recipientId,
-        version: snapshot.pendingTransfer.recipientVersion,
-        reference: snapshot.pendingTransfer.preview.recipient,
+        recipientId: pending.recipientId,
+        version: pending.recipientVersion,
+        reference: pending.preview.recipient,
       }]
     : [];
   return {

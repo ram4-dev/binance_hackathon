@@ -66,14 +66,34 @@ export type ConversationTurnRequest = z.infer<
   typeof conversationTurnRequestSchema
 >;
 
-export const transferPreviewSchema = z.object({
+export const walletTransferPreviewSchema = z.object({
   network: z.string().trim().min(1),
   token: z.string().trim().min(1),
   recipient: z.string().trim().min(1),
   amount: z.string().trim().min(1),
   estimatedFee: z.string().trim().min(1),
 });
+export type WalletTransferPreview = z.infer<typeof walletTransferPreviewSchema>;
+
+export const binanceTransferPreviewSchema = z.object({
+  venue: z.literal("binance"),
+  symbol: z.string().trim().min(1),
+  quantity: z.string().trim().min(1),
+  value: z.string().trim().min(1),
+  orderType: z.enum(["MARKET", "LIMIT"]).optional(),
+});
+export type BinanceTransferPreview = z.infer<typeof binanceTransferPreviewSchema>;
+
+export const transferPreviewSchema = z.union([
+  walletTransferPreviewSchema,
+  binanceTransferPreviewSchema,
+]);
 export type TransferPreview = z.infer<typeof transferPreviewSchema>;
+
+/** Runtime guard: true when a preview is a Binance venue preview. */
+export function isBinanceTransferPreview(preview: TransferPreview): preview is BinanceTransferPreview {
+  return "venue" in preview && preview.venue === "binance";
+}
 
 export const transactionResultSchema = z.object({
   network: z.string(),
@@ -112,7 +132,7 @@ export const conversationTurnResultSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("sent"),
     message: z.string(),
-    transaction: transactionResultSchema,
+    transaction: transactionResultSchema.optional(),
   }),
   z.object({ status: z.literal("cancelled"), message: z.string() }),
   z.object({
@@ -131,21 +151,48 @@ export const conversationMessageSchema = z.object({
 });
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 
-export const pendingTransferSchema = z.object({
+export const walletPendingTransferSchema = z.object({
   network: z.string(),
   token: z.string(),
   to: z.string(),
   amount: z.string(),
   wallet: z.string(),
-  preview: transferPreviewSchema,
+  preview: walletTransferPreviewSchema,
   recipientId: z.string().uuid().optional(),
   recipientVersion: z.number().int().positive().optional(),
   previewId: z.string().uuid().optional(),
 });
-export type PendingTransfer = z.infer<typeof pendingTransferSchema>;
-const projectedPendingTransferSchema = transferPreviewSchema.extend({
-  previewId: z.string().uuid(),
+export type WalletPendingTransfer = z.infer<typeof walletPendingTransferSchema>;
+
+export const binancePendingTransferSchema = z.object({
+  venue: z.literal("binance"),
+  operation: z.enum(["order", "internal_transfer"]),
+  preview: binanceTransferPreviewSchema,
+  idempotencyKey: z.string().trim().min(1),
+  request: z.record(z.string(), z.unknown()),
+  previewId: z.string().uuid().optional(),
 });
+export type BinancePendingTransfer = z.infer<typeof binancePendingTransferSchema>;
+
+export const pendingTransferSchema = z.union([
+  walletPendingTransferSchema,
+  binancePendingTransferSchema,
+]);
+export type PendingTransfer = z.infer<typeof pendingTransferSchema>;
+
+/** Runtime guard: true when a pending financial action is a Binance order/transfer. */
+export function isBinancePendingTransfer(pending: PendingTransfer): pending is BinancePendingTransfer {
+  return "venue" in pending && pending.venue === "binance";
+}
+
+const projectedPendingTransferSchema = z.union([
+  walletTransferPreviewSchema.extend({
+previewId: z.string().uuid(),
+  }),
+  binanceTransferPreviewSchema.extend({
+previewId: z.string().uuid(),
+  }),
+]);
 
 export const recipientMemoryInspectionSchema = z.object({
   selectedRecipient: z

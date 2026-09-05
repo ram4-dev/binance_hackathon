@@ -1,4 +1,4 @@
-import type { TransactionResult, TransferPreview } from '../contracts/http.js';
+import type { TransactionResult, WalletTransferPreview } from '../contracts/http.js';
 import { immediateTransactionReceiptWaiter } from '../wdk/transaction-receipt.js';
 import type {
   BroadcastOutcome,
@@ -70,7 +70,7 @@ export class FixtureWalletProvider implements WalletProvider {
     };
   }
 
-  public async previewTransfer(request: TransferRequest): Promise<TransferPreview> {
+  public async previewTransfer(request: TransferRequest): Promise<WalletTransferPreview> {
     return {
       network: request.network,
       token: request.token,

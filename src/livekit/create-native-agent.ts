@@ -5,6 +5,7 @@ import {
   type ChatMessage,
 } from "@livekit/agents";
 import {
+  BINANCE_MONEY_MOVING_TOOL_NAMES,
   createLiveKitModel,
   hydrateLiveKitChatContext,
   NATIVE_PREVIEW_TOOL_NAMES,
@@ -15,7 +16,7 @@ import {
   type WalletAgentContext,
 } from "../agent/definition.js";
 import type { ConversationSnapshot } from "../conversations/types.js";
-import type { WalletConversationService } from "../conversations/service.js";
+import type { NativePreviewInput, WalletConversationService } from "../conversations/service.js";
 import type { WalletConversationBinding } from "./wallet-conversation-llm.js";
 import type { NativeDecisionRouter } from "./native-text-turn-router.js";
 
@@ -45,12 +46,12 @@ export function createNativeLiveKitAgent(
         availableTools.has(name),
       ),
       onToolCompleted: async (tool) => {
-        if (tool.name === "send_token") {
+        if (tool.name === "send_token" || BINANCE_MONEY_MOVING_TOOL_NAMES.includes(tool.name as never)) {
           return input.conversationService.persistNativePreview({
             conversationId: input.binding.conversationId,
             userId: input.binding.userId,
             session: input.context.session,
-            input: tool.input as import("../agent/definition.js").SendTokenInput,
+            input: tool.input as NativePreviewInput,
             output: tool.output,
           });
         }
@@ -99,6 +100,7 @@ function isStatefulNativeTool(name: string): boolean {
     "get_selected_recipient_address",
     "stage_user_memory",
     "write_user_memory",
+    ...BINANCE_MONEY_MOVING_TOOL_NAMES,
   ].includes(name);
 }
 

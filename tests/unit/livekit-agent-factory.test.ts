@@ -66,6 +66,11 @@ describe("native LiveKit wallet agent factory", () => {
       'get_balance',
       'get_history',
       'send_token',
+      'get_market_quote',
+      'get_binance_balance',
+      'place_binance_order',
+      'binance_internal_transfer',
+      'get_binance_history',
     ];
     expect(Object.keys(agent.toolCtx.functionTools).sort()).toEqual(
       NATIVE_PREVIEW_TOOL_NAMES.filter((name) => expectedTools.includes(name)).sort(),
