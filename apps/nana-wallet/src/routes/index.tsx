@@ -9,7 +9,7 @@ import { RouteError, RoutePending } from "@/components/RouteStates";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, createConversationTurnSender, getErrorMessage, queryKeys } from "@/lib/api";
-import type { ConversationTurnResult } from "@/lib/api-types";
+import { isBinanceTransferPreview, type ConversationTurnResult } from "@/lib/api-types";
 import {
   runExclusiveConversationAction,
   shouldLockAfterConversationResolution,
@@ -612,20 +612,37 @@ function AgentePage() {
             ) : null}
             <p className="text-base leading-snug">{displayedTurn.message}</p>
             {displayedTurn.status === "confirmation_required" ? (
-              <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm sm:text-base">
-                <dt className="font-bold">Monto</dt>
-                <dd className="text-right">
-                  {displayedTurn.preview.amount} {displayedTurn.preview.token}
-                </dd>
-                <dt className="font-bold">Destino</dt>
-                <dd className="truncate text-right" title={displayedTurn.preview.recipient}>
-                  {displayedTurn.preview.recipient}
-                </dd>
-                <dt className="font-bold">Red</dt>
-                <dd className="text-right">{displayedTurn.preview.network}</dd>
-                <dt className="font-bold">Costo</dt>
-                <dd className="text-right">{displayedTurn.preview.estimatedFee}</dd>
-              </dl>
+              isBinanceTransferPreview(displayedTurn.preview) ? (
+                <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm sm:text-base">
+                  <dt className="font-bold">Símbolo</dt>
+                  <dd className="text-right">{displayedTurn.preview.symbol}</dd>
+                  <dt className="font-bold">Cantidad</dt>
+                  <dd className="text-right">{displayedTurn.preview.quantity}</dd>
+                  <dt className="font-bold">Valor</dt>
+                  <dd className="text-right">{displayedTurn.preview.value}</dd>
+                  {displayedTurn.preview.orderType ? (
+                    <>
+                      <dt className="font-bold">Tipo de orden</dt>
+                      <dd className="text-right">{displayedTurn.preview.orderType}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              ) : (
+                <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm sm:text-base">
+                  <dt className="font-bold">Monto</dt>
+                  <dd className="text-right">
+                    {displayedTurn.preview.amount} {displayedTurn.preview.token}
+                  </dd>
+                  <dt className="font-bold">Destino</dt>
+                  <dd className="truncate text-right" title={displayedTurn.preview.recipient}>
+                    {displayedTurn.preview.recipient}
+                  </dd>
+                  <dt className="font-bold">Red</dt>
+                  <dd className="text-right">{displayedTurn.preview.network}</dd>
+                  <dt className="font-bold">Costo</dt>
+                  <dd className="text-right">{displayedTurn.preview.estimatedFee}</dd>
+                </dl>
+              )
             ) : null}
           </section>
         ) : null}

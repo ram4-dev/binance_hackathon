@@ -177,14 +177,30 @@ export type AgentAudioTranscription = {
   transcript: string;
 };
 
-export type TransferPreview = {
+export type WalletTransferPreview = {
   network: string;
   token: string;
   recipient: string;
   amount: string;
   estimatedFee: string;
-  previewId?: string;
 };
+
+export type BinanceTransferPreview = {
+  venue: "binance";
+  symbol: string;
+  quantity: string;
+  value: string;
+  orderType?: "MARKET" | "LIMIT";
+};
+
+export type TransferPreview = WalletTransferPreview | BinanceTransferPreview;
+
+/** Runtime guard: true when a preview is a Binance venue preview. */
+export function isBinanceTransferPreview(
+  preview: TransferPreview,
+): preview is BinanceTransferPreview {
+  return "venue" in preview && preview.venue === "binance";
+}
 
 export type RecipientCandidate = {
   id: string;
@@ -205,7 +221,7 @@ export type ConversationTurnResult =
   | { status: "answer"; message: string }
   | { status: "clarification_required"; message: string; candidates: RecipientCandidate[] }
   | { status: "confirmation_required"; message: string; preview: TransferPreview }
-  | { status: "sent"; message: string; transaction: TransactionResult }
+  | { status: "sent"; message: string; transaction?: TransactionResult }
   | { status: "cancelled"; message: string }
   | { status: "error"; message: string; code: string };
 
