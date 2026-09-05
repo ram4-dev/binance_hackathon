@@ -4,11 +4,12 @@ import {
   voiceSpeakRequestSchema,
   type AgentTranscribeResponse,
 } from '../contracts/http.js';
+import { readElevenLabsApiKey } from '../config/privacy.js';
 
-const NAN_BASE_URL = 'https://api.nan.builders/v1';
+const NAN_BASE_URL = process.env.NAN_BASE_URL ?? 'https://api.nan.builders/v1';
 const NAN_STT_MODEL = process.env.NAN_STT_MODEL ?? 'whisper';
 
-const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io/v1';
+const ELEVENLABS_BASE_URL = process.env.ELEVENLABS_BASE_URL ?? 'https://api.elevenlabs.io/v1';
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? '21m00Tcm4TlvDq8ikWAM';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL ?? 'eleven_multilingual_v2';
 
@@ -72,7 +73,7 @@ export async function registerVoiceRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.post('/v1/voice/speak', async (request: FastifyRequest<{ Body: unknown }>, reply) => {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const apiKey = readElevenLabsApiKey();
     if (!apiKey) {
       reply.code(500);
       return reply.send({

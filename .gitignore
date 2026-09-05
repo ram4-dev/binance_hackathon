@@ -7,3 +7,13 @@ dist/
 .env
 .cache/
 *.log
+
+# Riptide artifacts (cloud-synced)
+.humanlayer/tasks/
+
+# Supabase CLI runtime metadata
+supabase/.branches/
+supabase/.temp/
+
+# Voice eval dataset (downloaded audio, never committed)
+evals/voice/.audio/
