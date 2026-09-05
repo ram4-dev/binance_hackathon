@@ -147,8 +147,87 @@ and reads Sepolia/USD₮ metadata but never sends tokens.
 
 ## Failure expectations
 
-Database/model unavailability, no match, conflicting facts, stale versions,
-or an inactive recipient stop before preview. If a recipient changes after the
-preview, its ID/version revalidation clears both the selection and approval;
-the user must resolve it again. Explicit user-supplied addresses retain the
-existing transfer path and are not stored or embedded by recipient memory.
+    Database/model unavailability, no match, conflicting facts, stale versions,
+    or an inactive recipient stop before preview. If a recipient changes after the
+    preview, its ID/version revalidation clears both the selection and approval;
+    the user must resolve it again. Explicit user-supplied addresses retain the
+    existing transfer path and are not stored or embedded by recipient memory.
+
+    ---
+
+    ## Demo de voz — Binance / Agent OS
+
+    Esta sección documenta la demo de voz de cuatro pasos del *Agent OS* de Binance.
+    Usá el modo fixture (`BINANCE_TOOLS_SOURCE=fixture`) y, si no querés contactar
+    un proveedor de modelo, `AGENT_RUNTIME=deterministic`.
+
+    ### Preparación
+
+    ```bash
+    cp .env.example .env
+    BINANCE_TOOLS_SOURCE=fixture AGENT_RUNTIME=deterministic npm run dev
+    ```
+
+    Levantá el worker de LiveKit (ver `docs/livekit-development-runbook.md`) y abrí
+    la sala de voz. Cada paso se habla; la respuesta esperada es lo que el agente
+    verbaliza y/o muestra en el transcript.
+
+    ### Paso 1 — Cotización de mercado
+
+    **Decís:** «¿Cómo está el BTC?»
+
+    **Qué se muestra:** el agente llama a `get_market_quote` y lee la cotización
+    (bid, ask, last) del activo.
+
+    **Respuesta esperada:** «BTC está a $60.002,50.»
+
+    ### Paso 2 — Compra confirmada de $50 de BNB
+
+    **Decís:** «Comprá $50 de BNB.»
+
+    **Qué se muestra:** el agente llama a `place_binance_order` en modo `dryRun` y
+    devuelve un preview de venue Binance (símbolo, cantidad, valor, tipo de orden).
+    La conversación queda esperando confirmación (`confirmation_required`).
+
+    **Respuesta esperada:** «Preparé la compra de $50 de BNB. ¿Confirmás?»
+
+    **Después confirmás por frase:** «Confirmo.»
+
+    **Qué se muestra:** la confirmación enruta la ejecución por la vía Binance; la
+    operación se ejecuta contra el transporte configurado (fixture en esta demo) y
+    se limpia el preview pendiente.
+
+    **Respuesta esperada:** resultado `status: sent` (fixture; sin broadcast real).
+
+    ### Paso 3 — Transferencia fuera de la allowlist (RETAINED)
+
+    **Decís:** «Mandale $5.000 a Marcos.»
+
+    **Qué se muestra:** el agente llama a `binance_internal_transfer`. Como USDT no
+    está en `BINANCE_ALLOWED_SYMBOLS`, la política produce un **hold** y la
+    operación **no se ejecuta**; se mantiene (RETAINED) con un motivo claro.
+
+    **Respuesta esperada:** `status: error` con código `binance_policy_hold`. El
+    agente explica que USDT no está en la lista permitida.
+
+    > **Checklist:** verificar que el código es `binance_policy_hold` y que la
+    > operación jamás se reporta como «ejecutada».
+
+    ### Paso 4 — Saldo post-trade
+
+    **Decís:** «¿Cuánto tengo?»
+
+    **Qué se muestra:** el agente llama a `get_binance_balance` y lee el saldo de
+    los activos.
+
+    **Respuesta esperada:** «Tenés 10000 USDT, 0.5 BTC, 2 ETH y 10 BNB.»
+
+    ### Checklist de la demo
+
+    - [ ] Paso 1: cotización leída y verbalizada.
+    - [ ] Paso 2: preview de la orden y confirmación por frase.
+    - [ ] Paso 2: la confirmación ejecuta la operación Binance (fixture).
+    - [ ] Paso 3: la transferencia fuera de la allowlist se mantiene (RETAINED) con
+      motivo oral y código `binance_policy_hold`.
+    - [ ] Paso 4: saldo leído y verbalizado.
+    - [ ] Ningún paso revela claves, seeds o credenciales.

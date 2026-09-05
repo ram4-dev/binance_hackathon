@@ -330,7 +330,16 @@ contain it.
 | `RECIPIENT_MEMORY_SCORE_THRESHOLD` | `0.78` | Minimum semantic score for a non-exact candidate. |
 | `RECIPIENT_MEMORY_SCORE_MARGIN` | `0.08` | Required lead over the runner-up; otherwise clarification is required. |
 | `RECIPIENT_MEMORY_SEED_FILE` | — | Confirmed-only JSON seed consumed by `npm run db:seed`. |
-
+| `BINANCE_TOOLS_SOURCE` | `fixture` | `fixture`, `testnet` or `mcp`. `live` is never enabled. |
+| `BINANCE_ALLOWED_SYMBOLS` | `BTC,ETH,BNB` | Comma-separated base-asset allowlist. |
+| `BINANCE_MAX_ORDER_USD` | `100` | Per-order USD cap (plain positive decimal). |
+| `BINANCE_MAX_DAILY_USD` | `1000` | Per-user UTC daily USD cap. |
+| `BINANCE_MCP_URL` | — | http(s) MCP server URL; required with `BINANCE_TOOLS_SOURCE=mcp`. |
+| `BINANCE_MCP_TRANSPORT` | `http` | `http` or `sse`. |
+| `BINANCE_MCP_TOKEN` | — | Optional MCP bearer token. |
+| `BINANCE_TESTNET_API_KEY` | — | Testnet API key; required with `testnet`/`mcp`. Never commit it. |
+| `BINANCE_TESTNET_API_SECRET` | — | Testnet API secret; required with `testnet`/`mcp`. Never commit it. |
+    
 `compose.yaml` starts only PostgreSQL/pgvector and persists its data in the
 named `recipient_memory_postgres` volume. A hosted pgvector-compatible
 PostgreSQL changes only the URLs above.
@@ -351,11 +360,74 @@ still follows:
 4. Require a separate `confirm` / `confirmar` in the same session.
 5. Revalidate again and make one matching `dryRun: false` call.
 
-`WDK_TOOLS_SOURCE=fixture` is the safe default. `live` starts the bundled MCP
-server through `WdkMcpClient`; use only a human-unlocked, dedicated, limited-
-funds test wallet. The read-only MCP smoke below never broadcasts.
+    `WDK_TOOLS_SOURCE=fixture` is the safe default. `live` starts the bundled MCP
+    server through `WdkMcpClient`; use only a human-unlocked, dedicated, limited-
+    funds test wallet. The read-only MCP smoke below never broadcasts.
+    
+    ## Binance / Agent OS
 
-## Verification and scripts
+    Además del Track 1 WDK, Nana integra un *Agent OS* para Binance que corre sobre
+    la misma capa de agente. Cinco herramientas (`get_market_quote`,
+    `get_binance_balance`, `place_binance_order`, `binance_internal_transfer` y
+    `get_binance_history`) se registran en el `ToolLoopAgent` y en el bucle de voz
+    LiveKit. Todo movimiento de dinero sigue el flujo preview → confirm/cancel y,
+    en el caso de la voz, la confirmación por frase (`confirmo`) enruta la
+    ejecución por la vía Binance.
+
+    ### Arquitectura
+
+    - **Transporte (`src/binance/`):** abstracción `BinanceClient` con tres modos:
+      `fixture` (determinista, en memoria, predeterminado), `testnet` (REST del
+      Spot Test Network, firmado con HMAC) y `mcp` (servidor MCP remoto HTTP/SSE,
+      con degradación automática a `testnet` si la conexión falla). El modo `live`
+      está prohibido: desde este repositorio nunca se negocia contra el mercado
+      real.
+    - **Política (`src/agent/policy-binance.ts`):** allowlist de símbolos
+      (`BINANCE_ALLOWED_SYMBOLS`), tope por orden (`BINANCE_MAX_ORDER_USD`) y tope
+      diario por usuario/UTC (`BINANCE_MAX_DAILY_USD`). Cualquier violación produce
+      un **hold**, nunca un fallo definitivo, y se informa al usuario con un
+      motivo oral.
+    - **Registro de herramientas:** definición → policy → conversión a AI SDK →
+      conversión LiveKit → lista de preview → lista de herramientas con estado.
+    - **Confirmación:** una operación de dinero se muestra primero como preview
+      (`confirmation_required`). La confirmación explícita ejecuta la operación
+      Binance; una cancelación o un hold de política jamás se informa como
+      «ejecutado».
+
+    ### Cómo ejecutar
+
+    ```bash
+    cp .env.example .env
+    npm ci
+    # Con fixture (predeterminado) no se necesita wallet, clave ni red.
+    BINANCE_TOOLS_SOURCE=fixture npm run dev
+    ```
+
+    Para reproducir la demo de voz + Binance en modo determinista, sin proveedor de
+    modelo:
+
+    ```bash
+    AGENT_RUNTIME=deterministic BINANCE_TOOLS_SOURCE=fixture npm run dev
+    ```
+
+    La demo y el runbook paso a paso están en
+    [`docs/demo-runbook.md`](docs/demo-runbook.md).
+
+    ### Variables de entorno
+
+    | Variable | Default | Significado |
+    | --- | --- | --- |
+    | `BINANCE_TOOLS_SOURCE` | `fixture` | `fixture` (determinista), `testnet` o `mcp`. `live` está prohibido. |
+    | `BINANCE_ALLOWED_SYMBOLS` | `BTC,ETH,BNB` | Allowlist de activos base; solo estos símbolos pueden operarse. |
+    | `BINANCE_MAX_ORDER_USD` | `100` | Tope USD por orden (decimal positivo). |
+    | `BINANCE_MAX_DAILY_USD` | `1000` | Tope USD diario por usuario (UTC). |
+    | `BINANCE_MCP_URL` | — | URL http(s) del servidor MCP; requerida con `BINANCE_TOOLS_SOURCE=mcp`. |
+    | `BINANCE_MCP_TRANSPORT` | `http` | `http` o `sse`. |
+    | `BINANCE_MCP_TOKEN` | — | Token opcional del servidor MCP. |
+    | `BINANCE_TESTNET_API_KEY` | — | Clave API de testnet; requerida con `testnet`/`mcp`. Nunca se commitea. |
+    | `BINANCE_TESTNET_API_SECRET` | — | Secreto de testnet; requerido con `testnet`/`mcp`. Nunca se commitea. |
+
+    ## Verification and scripts
 
 ```bash
 npm run typecheck
