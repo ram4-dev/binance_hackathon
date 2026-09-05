@@ -378,10 +378,15 @@ still follows:
 
     - **Transporte (`src/binance/`):** abstracción `BinanceClient` con tres modos:
       `fixture` (determinista, en memoria, predeterminado), `testnet` (REST del
-      Spot Test Network, firmado con HMAC) y `mcp` (servidor MCP remoto HTTP/SSE,
-      con degradación automática a `testnet` si la conexión falla). El modo `live`
-      está prohibido: desde este repositorio nunca se negocia contra el mercado
-      real.
+      Spot Test Network, firmado con HMAC) y `mcp`. El modo `mcp` es de dos
+      transportes seleccionados por variable, nunca por adivinanza: si se define
+      `BINANCE_MCP_TOKEN` usa el transporte directo `StreamableHTTP`+`Bearer`;
+      si queda vacío, levanta `mcp-remote` como proceso stdio que hace el login
+      OAuth en el navegador y cachea el token en `~/.mcp-auth`. La degradación
+      automática a `testnet` se conserva ante fallos de conexión genéricos,
+      pero el primer fallo que necesita OAuth no degrada: informa al operador
+      cómo autenticarse. El modo `live` está prohibido: desde este repositorio
+      nunca se negocia contra el mercado real.
     - **Política (`src/agent/policy-binance.ts`):** allowlist de símbolos
       (`BINANCE_ALLOWED_SYMBOLS`), tope por orden (`BINANCE_MAX_ORDER_USD`) y tope
       diario por usuario/UTC (`BINANCE_MAX_DAILY_USD`). Cualquier violación produce
@@ -403,14 +408,51 @@ still follows:
     BINANCE_TOOLS_SOURCE=fixture npm run dev
     ```
 
-    Para reproducir la demo de voz + Binance en modo determinista, sin proveedor de
-    modelo:
+        Para reproducir la demo de voz + Binance en modo determinista, sin proveedor de
+        modelo:
 
-    ```bash
-    AGENT_RUNTIME=deterministic BINANCE_TOOLS_SOURCE=fixture npm run dev
-    ```
+        ```bash
+        AGENT_RUNTIME=deterministic BINANCE_TOOLS_SOURCE=fixture npm run dev
+        ```
 
-    La demo y el runbook paso a paso están en
+        ### Modo `mcp` contra el Agent OS real
+
+        Para hablar con el Agent OS de Binance usá el modo `mcp`. El primer arranque
+        necesita autenticación OAuth (authorization-code + PKCE). El transporte
+        `src/binance/mcp-proxy-client.ts` levanta `mcp-remote` como proceso stdio; en
+        el primer arranque `mcp-remote` abre el navegador y cachea el token en
+        `~/.mcp-auth`, así que las corridas siguientes no vuelven a pedir login.
+
+        Dos formas de conectar, según `BINANCE_MCP_TOKEN`:
+
+        - **Sin token (recomendada para probar el flujo real):** se levanta el proxy
+          `mcp-remote https://agent.binance.com/mcp/agentic`. Si el proceso no puede
+          completar el handshake porque falta autenticar, la app NO degrada a
+          testnet: devuelve un error accionable que indica correr
+          `npx mcp-remote https://agent.binance.com/mcp/agentic` en otra terminal para
+          autenticarse en el navegador y recién después volver a intentar.
+        - **Con token:** se usa el transporte directo `StreamableHTTP`+`Bearer` de
+          `src/binance/mcp-remote-client.ts`. El token se inyecta en el header
+          `Authorization` y nunca se commitea.
+
+        Configurá en `.env`:
+
+        ```dotenv
+        BINANCE_TOOLS_SOURCE=mcp
+        # opcional: apunta a otro servidor; por defecto usa el Agent OS real
+        # BINANCE_MCP_URL=https://agent.binance.com/mcp/agentic
+        # BINANCE_MCP_TRANSPORT=http
+        # Dejá vacío para el proxy mcp-remote; definí un token para el transporte directo
+        # BINANCE_MCP_TOKEN=
+        BINANCE_TESTNET_API_KEY=...
+        BINANCE_TESTNET_API_SECRET=...
+        ```
+
+        > **Seguridad:** nunca commits reales. `BINANCE_MCP_TOKEN` y las credenciales de
+        > testnet viven solo en tu `.env` local. El primer login OAuth es interactivo y
+        > abre el navegador; no lo corras en un CI headless sin pre-autenticar antes.
+
+        La demo y el runbook paso a paso están en
     [`docs/demo-runbook.md`](docs/demo-runbook.md).
 
     ### Variables de entorno
@@ -421,9 +463,9 @@ still follows:
     | `BINANCE_ALLOWED_SYMBOLS` | `BTC,ETH,BNB` | Allowlist de activos base; solo estos símbolos pueden operarse. |
     | `BINANCE_MAX_ORDER_USD` | `100` | Tope USD por orden (decimal positivo). |
     | `BINANCE_MAX_DAILY_USD` | `1000` | Tope USD diario por usuario (UTC). |
-    | `BINANCE_MCP_URL` | — | URL http(s) del servidor MCP; requerida con `BINANCE_TOOLS_SOURCE=mcp`. |
-    | `BINANCE_MCP_TRANSPORT` | `http` | `http` o `sse`. |
-    | `BINANCE_MCP_TOKEN` | — | Token opcional del servidor MCP. |
+    | `BINANCE_MCP_URL` | `https://agent.binance.com/mcp/agentic` | URL http(s) del servidor MCP; con `BINANCE_TOOLS_SOURCE=mcp` toma ese valor por defecto. |
+    | `BINANCE_MCP_TRANSPORT` | `http` | `http` o `sse` (solo aplica al transporte directo con token). |
+    | `BINANCE_MCP_TOKEN` | — | Discriminador del modo `mcp`: si se define usa el transporte directo `StreamableHTTP`+`Bearer`; si queda vacío usa el proxy stdio `mcp-remote` (primer login OAuth en el navegador). |
     | `BINANCE_TESTNET_API_KEY` | — | Clave API de testnet; requerida con `testnet`/`mcp`. Nunca se commitea. |
     | `BINANCE_TESTNET_API_SECRET` | — | Secreto de testnet; requerido con `testnet`/`mcp`. Nunca se commitea. |
 

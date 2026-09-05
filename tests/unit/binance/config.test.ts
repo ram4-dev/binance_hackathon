@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readBinanceConfig } from '../../../src/config/binance.js';
+import { readBinanceConfig, DEFAULT_BINANCE_MCP_URL } from '../../../src/config/binance.js';
 
 describe('readBinanceConfig', () => {
   it('defaults to fixture when no source is set', () => {
@@ -30,8 +30,40 @@ describe('readBinanceConfig', () => {
     expect(config.testnetApiSecret).toBe('secret');
   });
 
-  it('requires BINANCE_MCP_URL when source is mcp', () => {
-    expect(() => readBinanceConfig({ BINANCE_TOOLS_SOURCE: 'mcp' })).toThrow(/BINANCE_MCP_URL/);
+  it('defaults BINANCE_MCP_URL to the real Agent OS endpoint when source is mcp', () => {
+    const config = readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    });
+    expect(config.mcpUrl).toBe(DEFAULT_BINANCE_MCP_URL);
+  });
+
+  it('respects an explicit BINANCE_MCP_URL when source is mcp', () => {
+    const config = readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_URL: 'https://other.example.com/mcp',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    });
+    expect(config.mcpUrl).toBe('https://other.example.com/mcp');
+  });
+
+  it('exposes the auth discriminator: mcpToken present implies direct transport', () => {
+    const withToken = readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_TOKEN: 'token',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    });
+    expect(withToken.mcpToken).toBe('token');
+
+    const withoutToken = readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    });
+    expect(withoutToken.mcpToken).toBeUndefined();
   });
 
   it('rejects a non-http BINANCE_MCP_URL fail-closed', () => {

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createBinanceClient, createBinanceClientFromEnv } from '../../../src/binance/client.js';
+import { McpProxyBinanceClient } from '../../../src/binance/mcp-proxy-client.js';
+import { McpRemoteBinanceClient } from '../../../src/binance/mcp-remote-client.js';
 import { readBinanceConfig } from '../../../src/config/binance.js';
 
 describe('createBinanceClient', () => {
@@ -28,6 +30,30 @@ describe('createBinanceClient', () => {
     }));
     expect(client.source).toBe('mcp');
     expect(client.id).toBe('binance-mcp');
+  });
+});
+
+describe('createBinanceClient mcp selection', () => {
+  it('selects the mcp-remote proxy when no BINANCE_MCP_TOKEN is set', () => {
+    const client = createBinanceClient(readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    }));
+    expect(client).toBeInstanceOf(McpProxyBinanceClient);
+    expect(client.source).toBe('mcp');
+  });
+
+  it('selects the direct StreamableHTTP transport when BINANCE_MCP_TOKEN is set', () => {
+    const client = createBinanceClient(readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_URL: 'https://mcp.example.com/mcp',
+      BINANCE_MCP_TOKEN: 'token',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    }));
+    expect(client).toBeInstanceOf(McpRemoteBinanceClient);
+    expect(client.source).toBe('mcp');
   });
 });
 

@@ -13,6 +13,7 @@ import type {
 } from './types.js';
 import { FixtureBinanceClient } from './client.fixture.js';
 import { TestnetBinanceClient } from './client.testnet.js';
+import { McpProxyBinanceClient } from './mcp-proxy-client.js';
 import { McpRemoteBinanceClient } from './mcp-remote-client.js';
 
 /**
@@ -43,7 +44,11 @@ export function createBinanceClient(config: BinanceConfig): BinanceClient {
     case 'testnet':
       return new TestnetBinanceClient({ config });
     case 'mcp':
-      return new McpRemoteBinanceClient({ config });
+      // Explicit selection: a bearer token implies the direct StreamableHTTP
+      // transport; its absence implies the mcp-remote stdio proxy (first-run
+      // OAuth). Never guess between them.
+      if (config.mcpToken) return new McpRemoteBinanceClient({ config });
+      return new McpProxyBinanceClient({ config });
     default: {
       const exhaustive: never = config.source;
       throw new Error(`Unsupported BINANCE_TOOLS_SOURCE: ${String(exhaustive)}`);

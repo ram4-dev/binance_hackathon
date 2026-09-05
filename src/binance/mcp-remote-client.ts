@@ -130,7 +130,7 @@ export class McpRemoteBinanceClient implements BinanceClient {
  * Bridges the remote MCP session to the BinanceClient interface by mapping each
  * interface method to the corresponding MCP tool call and decoding the result.
  */
-class McpBinanceSessionAdapter implements BinanceClient {
+export class McpBinanceSessionAdapter implements BinanceClient {
   public readonly id = 'binance-mcp-session';
   public readonly source = 'mcp' as const;
   private readonly session: McpBinanceSession;

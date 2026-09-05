@@ -229,5 +229,100 @@ and reads Sepolia/USD₮ metadata but never sends tokens.
     - [ ] Paso 2: la confirmación ejecuta la operación Binance (fixture).
     - [ ] Paso 3: la transferencia fuera de la allowlist se mantiene (RETAINED) con
       motivo oral y código `binance_policy_hold`.
-    - [ ] Paso 4: saldo leído y verbalizado.
-    - [ ] Ningún paso revela claves, seeds o credenciales.
+        - [ ] Paso 4: saldo leído y verbalizado.
+        - [ ] Ningún paso revela claves, seeds o credenciales.
+
+    ---
+
+    ## Conexión real al Agent OS (modo `mcp`)
+
+    Esta sección documenta cómo conectar el canal Binance al Agent OS real en lugar de
+    usar el fixture. **El primer paso es de solo lectura** (cotización y saldo); recién
+    después, opcionalmente, una operación mínima con topes. Nunca se usan fondos de
+    mainnet y nunca se commitea un token real.
+
+    ### Preparación
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Configurá en `.env`:
+
+    ```dotenv
+    BINANCE_TOOLS_SOURCE=mcp
+    # BINANCE_MCP_URL=https://agent.binance.com/mcp/agentic
+    # BINANCE_MCP_TRANSPORT=http
+    # Dejá BINANCE_MCP_TOKEN vacío para usar el proxy mcp-remote (login OAuth)
+    BINANCE_TESTNET_API_KEY=...
+    BINANCE_TESTNET_API_SECRET=...
+    ```
+
+    El transport `src/binance/mcp-proxy-client.ts` arranca
+    `mcp-remote https://agent.binance.com/mcp/agentic` como subproceso stdio. En el
+    **primer arranque** `mcp-remote` abre el navegador y te deja iniciar sesión con la
+    cuenta Binance (authorization-code + PKCE); el token queda cacheado en `~/.mcp-auth`,
+    así que las corridas siguientes no vuelven a pedir login.
+
+    ### Primer login (solo la primera vez)
+
+    Si la app dice que falta autenticación, en lugar de degradar a testnet te muestra un
+    error accionable con el comando exacto. Corrélo en otra terminal y logueate en el
+    navegador:
+
+    ```bash
+    npx mcp-remote https://agent.binance.com/mcp/agentic
+    ```
+
+    Cuando veas que el proxy queda escuchando (`Proxy established successfully`), volvé a
+    arrancar la app. El token ya está cacheado y no hace falta volver a autenticar.
+
+    ### Paso A — Cotización (solo lectura)
+
+    ```bash
+    BINANCE_TOOLS_SOURCE=mcp AGENT_RUNTIME=deterministic npm run dev
+    ```
+
+    **Decís:** «¿Cómo está el BTC?»
+
+    **Qué se muestra:** el agente llama a `get_market_quote` contra el Agent OS real y
+    lee bid/ask/last.
+
+    **Respuesta esperada:** el precio real del BTC que devuelve el Agent OS. Si todavía
+    no autenticaste, verás el error accionable, no una falla silenciosa a testnet.
+
+    ### Paso B — Saldo (solo lectura)
+
+    **Decís:** «¿Cuánto tengo?»
+
+    **Qué se muestra:** el agente llama a `get_binance_balance` y lee el saldo de la
+    cuenta autorizada.
+
+    **Respuesta esperada:** los saldos reales de tu cuenta (solo lectura; no se mueve
+    nada).
+
+    ### Paso C — Operación mínima opcional (con topes)
+
+    Para probar la ejecución contra el Agent OS real con riesgo mínimo, usá un símbolo
+    permitido y un volumen chico; el tope por orden (`BINANCE_MAX_ORDER_USD`) y el tope
+    diario (`BINANCE_MAX_DAILY_USD`) siguen aplicando y todo movimiento de dinero pasa
+    por el flujo preview → confirm/cancel.
+
+    ```dotenv
+    BINANCE_ALLOWED_SYMBOLS=BTC
+    BINANCE_MAX_ORDER_USD=10
+    BINANCE_MAX_DAILY_USD=10
+    ```
+
+    **Decís:** «Comprá $5 de BTC.»
+
+    **Qué se muestra:** el agente muestra un preview de la orden y espera confirmación
+    (`confirmation_required`). Al confirmar por frase («Confirmo»), la ejecución enruta
+    por la vía `mcp` real.
+
+    > **Checklist de la conexión real:**
+    > - [ ] El primer login abre el navegador y cachea el token en `~/.mcp-auth`.
+    > - [ ] Paso A lee la cotización real (solo lectura).
+    > - [ ] Paso B lee el saldo real (solo lectura).
+    > - [ ] Paso C solo si se entendió el alcance; con topes chicos y confirmación explícita.
+    > - [ ] Ningún paso muestra el token ni las credenciales de testnet.

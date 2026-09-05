@@ -1,6 +1,13 @@
 import type { BinanceToolsSource } from '../binance/types.js';
 
 /**
+ * The verified public Binance Agent OS MCP endpoint (standard MCP 2025-06-18,
+ * OAuth authorization-code + PKCE). This is the default target for the mcp-remote
+ * proxy transport; an operator can override it with BINANCE_MCP_URL.
+ */
+export const DEFAULT_BINANCE_MCP_URL = 'https://agent.binance.com/mcp/agentic';
+
+/**
  * Binance transport configuration parsed from the environment.
  *
  * Parsing is fail-closed: any ambiguous or unsafe value (including the live
@@ -109,7 +116,7 @@ export function readBinanceConfig(environment: NodeJS.ProcessEnv = process.env):
   if (source === 'mcp') {
     return {
       source,
-      mcpUrl: parseMcpUrl(optionalTrimmed(environment.BINANCE_MCP_URL)),
+      mcpUrl: parseMcpUrl(optionalTrimmed(environment.BINANCE_MCP_URL) ?? DEFAULT_BINANCE_MCP_URL),
       mcpToken: optionalTrimmed(environment.BINANCE_MCP_TOKEN),
       mcpTransport,
       allowedSymbols,
