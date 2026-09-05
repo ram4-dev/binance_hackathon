@@ -1,5 +1,22 @@
 # Nana Wallet
 
+## Demo rápida: Circle en Arc Testnet
+
+Para Rama o su agente: seguir [el README de la demo](scripts/arc-demo/README.md).
+Incluye instalación, carga privada de credenciales, arranque local, comandos,
+prueba onchain y resolución de problemas. No requiere OpenAI, LiveKit ni Docker.
+Esta demo escrita es independiente del producto WDK documentado más abajo.
+
+```sh
+npm ci --ignore-scripts
+npm run demo:arc:configure
+npm run demo:arc
+```
+
+Abrir `http://127.0.0.1:8787`. Las credenciales se cargan localmente, no vienen
+en Git. No ejecutar provisioning ni registrar otro entity secret para usar las
+wallets existentes.
+
 Wallet agéntica argentina diseñada para personas mayores y personas con discapacidad. Nana reduce la complejidad de una billetera tradicional: el usuario puede pedir una acción con lenguaje cotidiano, revisar claramente qué va a ocurrir y confirmar antes de mover dinero.
 
 > **Estado:** entrega del Aleph Hackathon 2026 para el Track 1 — Build with the WDK CLI. El repositorio contiene un frontend funcional y un backend HTTP WDK con modo fixture seguro por defecto y un modo live explícito para una wallet de prueba en Sepolia.
