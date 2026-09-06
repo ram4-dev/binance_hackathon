@@ -1,5 +1,22 @@
 # Nana Wallet
 
+## Demo rápida: Circle en Arc Testnet
+
+Para Rama o su agente: seguir [el README de la demo](scripts/arc-demo/README.md).
+Incluye instalación, carga privada de credenciales, arranque local, comandos,
+prueba onchain y resolución de problemas. No requiere OpenAI, LiveKit ni Docker.
+Esta demo escrita es independiente del producto WDK documentado más abajo.
+
+```sh
+npm ci --ignore-scripts
+npm run demo:arc:configure
+npm run demo:arc
+```
+
+Abrir `http://127.0.0.1:8787`. Las credenciales se cargan localmente, no vienen
+en Git. No ejecutar provisioning ni registrar otro entity secret para usar las
+wallets existentes.
+
 Wallet agéntica argentina diseñada para personas mayores y personas con discapacidad. Nana reduce la complejidad de una billetera tradicional: el usuario puede pedir una acción con lenguaje cotidiano, revisar claramente qué va a ocurrir y confirmar antes de mover dinero.
 
 > **Estado:** entrega del Aleph Hackathon 2026 para el Track 1 — Build with the WDK CLI. El repositorio contiene un frontend funcional y un backend HTTP WDK con modo fixture seguro por defecto y un modo live explícito para una wallet de prueba en Sepolia.
@@ -12,27 +29,27 @@ Nana es una wallet agéntica para personas mayores y personas con discapacidad. 
 
 ### WDK usado
 
-Los paquetes WDK declarados en [`package.json`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/package.json#L30-L32) son:
+Los paquetes WDK declarados en [`package.json`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/package.json#L30-L32) son:
 
 - `@tetherto/wdk@1.0.0-beta.14` — runtime WDK.
 - `@tetherto/wdk-cli@1.0.0-beta.2` — CLI y proceso MCP (`wdk-mcp`).
 - `@tetherto/wdk-wallet-evm@1.0.0-beta.11` — wallet EVM.
 
-Permalinks de la integración WDK en el commit público [`71509cc`](https://github.com/rober8b/aleph-hackathon/commit/71509cc1957d90fedd95255f0a1241fddbf0ff0b):
+Permalinks de la integración WDK en el commit público [`71509cc`](https://github.com/theboyplunger0x/nana-wallet/commit/71509cc1957d90fedd95255f0a1241fddbf0ff0b):
 
-- [`src/wdk/mcp-client.ts#L117-L118`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/wdk/mcp-client.ts#L117-L118) — resuelve el proceso MCP WDK incluido.
-- [`src/wdk/mcp-client.ts#L213-L220`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/wdk/mcp-client.ts#L213-L220) — configura el spawn del proceso bundled `wdk-mcp` por stdio.
-- [`src/agent/wdk-tools.ts#L39-L49`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wdk-tools.ts#L39-L49) — propaga `WDK_INDEXER_API_KEY` al proceso WDK sin exponerla.
-- [`src/agent/wdk-tools.ts#L72-L103`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wdk-tools.ts#L72-L103) — expone las herramientas WDK al agente, incluido `send_token`.
-- [`src/api/wallet.ts#L17-L50`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/api/wallet.ts#L17-L50) y [`#L52-L100`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/api/wallet.ts#L52-L100) — adapta las respuestas oficiales de balance e historial WDK al contrato HTTP.
-- [`src/agent/wallet-agent.ts#L147-L211`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wallet-agent.ts#L147-L211) y [`#L394-L455`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wallet-agent.ts#L394-L455) — aplica la policy live y las guardas de preview/confirmación al `send_token`.
-- [`src/wdk/transaction-receipt.ts#L164-L212`](https://github.com/rober8b/aleph-hackathon/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/wdk/transaction-receipt.ts#L164-L212) — verifica chain ID Sepolia, hash, receipt y estado confirmado/revertido después del broadcast.
+- [`src/wdk/mcp-client.ts#L117-L118`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/wdk/mcp-client.ts#L117-L118) — resuelve el proceso MCP WDK incluido.
+- [`src/wdk/mcp-client.ts#L213-L220`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/wdk/mcp-client.ts#L213-L220) — configura el spawn del proceso bundled `wdk-mcp` por stdio.
+- [`src/agent/wdk-tools.ts#L39-L49`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wdk-tools.ts#L39-L49) — propaga `WDK_INDEXER_API_KEY` al proceso WDK sin exponerla.
+- [`src/agent/wdk-tools.ts#L72-L103`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wdk-tools.ts#L72-L103) — expone las herramientas WDK al agente, incluido `send_token`.
+- [`src/api/wallet.ts#L17-L50`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/api/wallet.ts#L17-L50) y [`#L52-L100`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/api/wallet.ts#L52-L100) — adapta las respuestas oficiales de balance e historial WDK al contrato HTTP.
+- [`src/agent/wallet-agent.ts#L147-L211`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wallet-agent.ts#L147-L211) y [`#L394-L455`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/agent/wallet-agent.ts#L394-L455) — aplica la policy live y las guardas de preview/confirmación al `send_token`.
+- [`src/wdk/transaction-receipt.ts#L164-L212`](https://github.com/theboyplunger0x/nana-wallet/blob/71509cc1957d90fedd95255f0a1241fddbf0ff0b/src/wdk/transaction-receipt.ts#L164-L212) — verifica chain ID Sepolia, hash, receipt y estado confirmado/revertido después del broadcast.
 
 ### Demo
 
 - **BLOCKER DE ENTREGA — video de demo:** TODO — agregar aquí la URL pública del video antes de enviar la candidatura. No se inventa un enlace mientras no exista uno real.
 - **Red de referencia:** Ethereum Sepolia.
-- **Token de demo:** alias WDK `usdt-test` (USD₮ de prueba).
+- **Token de demo:** alias WDK `USDT` (USD₮ de prueba).
 - **Contrato del token:** `0xc4DCC311c028e341fd8602D8eB89c5de94625927`.
 - **Modo seguro reproducible:** `WDK_TOOLS_SOURCE=fixture` (valor predeterminado; no requiere wallet, unlock ni broadcast).
 
@@ -60,22 +77,41 @@ El flujo de pago siempre muestra destinatario, importe, cuenta de origen y adver
 
 ## Estructura
 
+Son dos partes bien separadas: el backend vive en la raíz (`src/`) y el frontend en `apps/nana-wallet/`. El backend define el contrato HTTP (zod) y el front lo replica a mano; nunca se cruza el límite.
+
 ```text
 .
+├── src/                        # Backend — Node 22, Fastify, LiveKit Agents, WDK/MCP, Supabase
+│   ├── agent/                  # Definición del agente, herramientas, instrucciones (LLM/determinístico)
+│   ├── api/                    # Rutas HTTP (health, wallet, conversaciones, voz)
+│   ├── wdk/                    # Cliente MCP WDK, receipt de transacción y lecturas directas
+│   ├── wallet/                 # Providers de wallet (fixture por defecto / live vía WDK)
+│   ├── conversations/          # Estado de sesión, idioma, intenciones, registro de tareas financieras
+│   ├── livekit/                # Worker de voz (AgentSession nativo, adaptadores, publisher de revisiones)
+│   ├── memory/                 # Recipient memory (embeddings, repositorio, runtime, tools)
+│   ├── auth/                   # Identidad y bindings Ed25519 para live voice
+│   ├── observability/          # Observabilidad implementada (métricas, traces redactados)
+│   ├── config/                 # Lectura de env/process/livekit/privacy
+│   ├── contracts/              # Contratos HTTP (zod) — fuente de verdad de la API
+│   ├── db/                     # Cliente de base y migraciones (Supabase Postgres)
+│   └── runtime/                # Dependencias compartidas del runtime
 ├── apps/
 │   └── nana-wallet/           # Frontend web y proyectos Capacitor
 │       ├── android/           # Proyecto nativo Android
 │       ├── ios/               # Proyecto nativo iOS
-│       └── src/               # Rutas, componentes, API y mocks
-└── docs/
-    └── wdk-agent-development-plan.md
+│       └── src/               # Rutas, componentes, API y mocks (replica api-types.ts)
+├── tests/                      # Suites backend: unit, integration, simulation y e2e
+├── evals/                      # Evalite: evalúa turns y voz del agente
+├── supabase/                   # Config local (major_version 17, puerto 54322) y migraciones
+├── examples/                   # Seeds de demo (recipient-memory.seed.json)
+└── docs/                       # Arquitectura, API y runbooks
 ```
 
 ## Ejecutar localmente
 
 Requisitos:
 
-- Node.js 22.22 o superior
+- Node.js `>=22.18.0` (según `package.json` -> `engines`)
 - npm
 
 Desde la raíz del repositorio:
@@ -170,7 +206,7 @@ Ejecutalos desde `apps/nana-wallet`:
 
 El frontend consume un contrato `/v1` tipado para agente, contactos, agenda, facturas, saldo, movimientos e intenciones de pago. Durante el desarrollo esas rutas son respondidas por MSW.
 
-El backend WDK consulta la wallet, prepara una transferencia con `dryRun`, solicita una confirmación separada y recién entonces puede intentar transmitirla en modo live. El plan técnico está en [docs/wdk-agent-development-plan.md](docs/wdk-agent-development-plan.md).
+El backend WDK consulta la wallet, prepara una transferencia con `dryRun`, solicita una confirmación separada y recién entonces puede intentar transmitirla en modo live. La referencia técnica está en [docs/architecture.md](docs/architecture.md).
 
 La confirmación conversacional es parte de la experiencia de la demo, no una frontera de autorización suficiente para producción. Una versión productiva debe mantener las claves fuera del agente y aplicar almacenamiento seguro, autenticación local, límites y políticas de riesgo.
 
@@ -197,7 +233,7 @@ npm run mobile:sync
 
 Además del frontend, este repositorio incluye un backend HTTP para el Track 1 WDK, que interpreta instrucciones en lenguaje natural y opera con `wdk-mcp` a través de un `ToolLoopAgent`.
 
-Ver detalles en `docs/wdk-agent-development-plan.md`, `docs/api.md` y `docs/demo-runbook.md`.
+Ver detalles en `docs/architecture.md`, `docs/api.md` y `docs/demo-runbook.md`.
 
 Para ejecutar la integración completa contra la wallet local de Sepolia, seguí
 el [runbook local live](docs/local-live-runbook.md). Ese es el único flujo que
@@ -206,8 +242,8 @@ puede emitir una transacción; la demo por defecto permanece en fixture.
 ### Setup backend desde un clone limpio
 
 ```bash
-git clone https://github.com/rober8b/aleph-hackathon.git
-cd aleph-hackathon
+git clone https://github.com/theboyplunger0x/nana-wallet.git
+cd nana-wallet
 cp .env.example .env
 npm ci
 ```
@@ -228,15 +264,15 @@ npm run build
 
 Con `AGENT_RUNTIME=deterministic WDK_TOOLS_SOURCE=fixture`, las respuestas son locales y deterministas: no se solicitan credenciales, no se requiere wallet y no hay broadcast.
 
-Para habilitar la integración live local desde ese mismo clone, seguí el [runbook live](docs/local-live-runbook.md). Si la wallet `agent-dev` todavía no existe, creala una sola vez; después agregá el token de prueba y desbloqueá la wallet durante 30 minutos:
+Para habilitar la integración live local desde ese mismo clone, seguí el [runbook live](docs/local-live-runbook.md). Si la wallet `agent-dev` todavía no existe, creala una sola vez (la guía completa con pasos y cuidados está en [docs/create-wallet.md](docs/create-wallet.md)); después agregá el token de prueba y desbloqueá la wallet durante 30 minutos:
 
 ```bash
 npx wdk wallet create --name agent-dev
-npx wdk token add '{"network":"sepolia","token":"usdt-test","symbol":"USD₮","decimals":6,"isNative":false,"address":"0xc4DCC311c028e341fd8602D8eB89c5de94625927"}'
+npx wdk token add '{"network":"sepolia","token":"USDT","symbol":"USD₮","decimals":6,"isNative":false,"address":"0xc4DCC311c028e341fd8602D8eB89c5de94625927"}'
 npx wdk wallet unlock --name agent-dev --ttl 30
 ```
 
-No ejecutes `wallet create` si `agent-dev` ya existe. Fondeá esa wallet con montos mínimos de Sepolia ETH para gas y del token de prueba; nunca copies una seed o secreto al repositorio. Configurá en `.env` `WDK_TOOLS_SOURCE=live`, `WDK_WALLET_NAME=agent-dev`, `WDK_NETWORK=sepolia`, `WDK_TOKEN=usdt-test`, `WDK_MAX_TRANSFER_AMOUNT=0.05` y `WDK_ALLOWED_RECIPIENTS=<direcciones EVM aprobadas separadas por coma>`. El límite y la allowlist son obligatorios y fail-closed: reemplazá el ejemplo por el destinatario real aprobado de Sepolia antes de iniciar el backend. `WDK_INDEXER_API_KEY` es opcional para transferencias, pero necesario para consultar historial indexado. Configurá la URL del backend en el frontend según el runbook. Una ejecución live puede emitir una transacción real de testnet. Los tests `npm run test:e2e:wdk-mcp` son de lectura/metadatos y no llaman `send_token`.
+No ejecutes `wallet create` si `agent-dev` ya existe. Fondeá esa wallet con montos mínimos de Sepolia ETH para gas y del token de prueba; nunca copies una seed o secreto al repositorio. Configurá en `.env` `WDK_TOOLS_SOURCE=live`, `WDK_WALLET_NAME=agent-dev`, `WDK_NETWORK=sepolia`, `WDK_TOKEN=USDT`, `WDK_MAX_TRANSFER_AMOUNT=0.05` y `WDK_ALLOWED_RECIPIENTS=<direcciones EVM aprobadas separadas por coma>`. El límite y la allowlist son obligatorios y fail-closed: reemplazá el ejemplo por el destinatario real aprobado de Sepolia antes de iniciar el backend. `WDK_INDEXER_API_KEY` es opcional para transferencias, pero necesario para consultar historial indexado. Configurá la URL del backend en el frontend según el runbook. Una ejecución live puede emitir una transacción real de testnet. Los tests `npm run test:e2e:wdk-mcp` son de lectura/metadatos y no llaman `send_token`.
 
 For the RAG demo, set the following values in `.env` (the supplied UUID and
 seed are demo data and contain no credential):
@@ -270,9 +306,9 @@ The first prefetch downloads the pinned embedding model into
 | Two plausible Lucas records | Asks a description-based question such as “Lucas (mi nieto) or Lucas (el electricista)?” No preview is created. |
 | No match, stale record, DB/model failure | Stops before address lookup and before any WDK preview. |
 
-Once there is one stable `recipientId` and `version`, `get_recipient_address`
-may obtain the current address internally. That exact string is passed unchanged
-as `send_token.to`. The record is checked once before `dryRun: true` and again
+Once there is one stable `recipientId` and `version`, `get_selected_recipient_address`
+(takes no arguments) may obtain the current address internally. That exact string
+is passed unchanged as `send_token.to`. The record is checked once before `dryRun: true` and again
 before the matching approved `dryRun: false`; a changed, deleted, inactive, or
 foreign record clears the selection and approval.
 
@@ -300,7 +336,7 @@ principal before enabling the feature.
 | --- | --- | --- |
 | `search_recipients` | `{ query }` | Finds current-user candidates and may bind one ID/version to the session. Addresses are omitted. |
 | `search_user_memory` | `{ query }` | Returns current-user relationship evidence only. |
-| `get_recipient_address` | `{ recipientId, expectedVersion }` | Returns an address only for the session-bound, still-current selection. |
+| `get_selected_recipient_address` | *(no arguments)* | Returns the exact address for the recipient already selected and version-bound in this session. |
 | `stage_user_memory` | Recipient draft or relationship fact | Stages exact user-provided content for five minutes; no data is yet written. |
 | `write_user_memory` | `{ confirmationId }` | Consumes a single-use, unexpired confirmation and writes atomically. |
 
@@ -345,9 +381,15 @@ contain it.
 named `recipient_memory_postgres` volume. A hosted pgvector-compatible
 PostgreSQL changes only the URLs above.
 
+> **Dos setups locales de base de datos.** Existen dos formas de levantar Postgres:
+>
+> 1. `docker compose up -d db` — `pgvector/pgvector:0.8.1-pg16` en `127.0.0.1:5432`. Es el quick-start de CI y de los tests de integración del backend.
+> 2. `npx supabase start` — stack local completo de Supabase (Postgres 17 en `127.0.0.1:54322` + Studio, Inbucket). Es el que usan los runbooks de demo/live.
+> Ambos son válidos según lo que necesites; no los confundas ni asumas que uno reemplaza al otro.
+
 El fixture local conserva `WDK_TOKEN=USDT` para las respuestas deterministas.
 Para reproducir la configuración live del track, definí explícitamente
-`WDK_NETWORK=sepolia` y `WDK_TOKEN=usdt-test`; ese alias corresponde al token de
+`WDK_NETWORK=sepolia` y `WDK_TOKEN=USDT`; ese alias corresponde al token de
 prueba cuyo contrato está documentado en la sección de demo.
 
 ## Approval and WDK
