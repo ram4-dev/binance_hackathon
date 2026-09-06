@@ -154,7 +154,11 @@ export function readWorkerProcessConfig(
   const databaseUrl = required(environment, "DATABASE_URL");
   const demoUserId = required(environment, "DEMO_USER_ID");
   if (!uuid.safeParse(demoUserId).success) throw new Error("DEMO_USER_ID must be a UUID for the worker.");
-  required(environment, "OPENAI_API_KEY");
+  // OPENAI_API_KEY is the canonical name; OPEN_AI_API_KEY (Secret Vault
+  // naming) is accepted as a fallback alias so either provides it.
+  if (!environment["OPENAI_API_KEY"]?.trim() && !environment["OPEN_AI_API_KEY"]?.trim()) {
+    throw new Error("OPENAI_API_KEY is required for the worker.");
+  }
   return {
     ...liveKit,
     publicKey,

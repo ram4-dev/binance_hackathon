@@ -59,5 +59,7 @@ describe('process-specific configuration', () => {
     };
     expect(() => readWorkerProcessConfig(base)).toThrow('OPENAI_API_KEY is required');
     expect(readWorkerProcessConfig({ ...base, OPENAI_API_KEY: 'vault-openai-key' })).toBeDefined();
+    // OPEN_AI_API_KEY (Secret Vault naming) is accepted as a fallback alias.
+    expect(readWorkerProcessConfig({ ...base, OPEN_AI_API_KEY: 'vault-openai-key' })).toBeDefined();
   });
 });
