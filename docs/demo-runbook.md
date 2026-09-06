@@ -291,7 +291,16 @@ and reads Sepolia/USD₮ metadata but never sends tokens.
         BINANCE_MCP_TOKEN="$(scripts/binance-mcp-token.sh)" BINANCE_TOOLS_SOURCE=mcp npm run dev
         ```
 
-        ### Primer login (solo la primera vez)
+        ### Correr el front contra el backend real (E2E)
+
+En desarrollo el front arranca MSW y las respuestas del chat son mock. Para el
+E2E real desactivá los mocks con `VITE_MSW=0` al levantar el front:
+
+```bash
+cd apps/nana-wallet && VITE_MSW=0 npm run dev -- --host 0.0.0.0 --port 8083
+```
+
+### Primer login (solo la primera vez)
 
         Si la app dice que falta autenticación, en lugar de degradar a testnet te muestra un
         error accionable. En la vía del proxy stdio (`mcp-remote`, sin token) el login es
