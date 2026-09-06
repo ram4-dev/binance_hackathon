@@ -23,8 +23,19 @@ export type BinanceOrderRequest = {
   symbol: string;
   side: BinanceOrderSide;
   type: BinanceOrderType;
-  quantity: string;
+  /**
+   * Base-asset quantity. Required for LIMIT orders and for MARKET orders that do
+   * not specify a quote/notional amount; optional when `quoteOrderQty` carries the
+   * USD amount (e.g. a MARKET BUY that spends a fixed notional).
+   */
+  quantity?: string;
   price?: string;
+  /**
+   * Quote/notional amount in the quote asset (e.g. USD₮). For a MARKET BUY this is
+   * passed to `spot.newOrder` as `quoteOrderQty`; when omitted the transport uses
+   * the base `quantity` instead.
+   */
+  quoteOrderQty?: string;
 };
 
 export type BinanceOrder = {
@@ -53,6 +64,12 @@ export type MarketQuote = {
   ask: string;
   last: string;
   timestamp: string;
+  /**
+   * Optional 24-hour percent change reported by the venue (e.g. `2.50`). The
+   * fixture/testnet transports do not populate it; the remote Agent OS transport
+   * reads it from `spot.ticker24hr`.
+   */
+  change24h?: string;
 };
 
 export type BinanceInternalTransferRequest = {

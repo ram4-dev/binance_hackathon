@@ -337,7 +337,8 @@ contain it.
 | `BINANCE_MCP_URL` | — | http(s) MCP server URL; required with `BINANCE_TOOLS_SOURCE=mcp`. |
 | `BINANCE_MCP_TRANSPORT` | `http` | `http` or `sse`. |
 | `BINANCE_MCP_TOKEN` | — | Optional MCP bearer token. |
-| `BINANCE_TESTNET_API_KEY` | — | Testnet API key; required with `testnet`/`mcp`. Never commit it. |
+| `BINANCE_MCP_DEGRADE` | `true` | When `true` (default) the mcp transports fall back to testnet on a connect failure. `false` surfaces the connect error instead and does not require testnet credentials. |
+| `BINANCE_TESTNET_API_KEY` | — | Testnet API key; required with `testnet`/`mcp` (or `mcp` when degrade is enabled). Never commit it. |
 | `BINANCE_TESTNET_API_SECRET` | — | Testnet API secret; required with `testnet`/`mcp`. Never commit it. |
     
 `compose.yaml` starts only PostgreSQL/pgvector and persists its data in the
@@ -386,7 +387,13 @@ still follows:
       automática a `testnet` se conserva ante fallos de conexión genéricos,
       pero el primer fallo que necesita OAuth no degrada: informa al operador
       cómo autenticarse. El modo `live` está prohibido: desde este repositorio
-      nunca se negocia contra el mercado real.
+      nunca se negocia contra el mercado real. Contra el Agent OS real, el
+      transporte directo habla el protocolo de descubrimiento/ejecución
+      (`tool_search` paginado por categoría + `tool_execute`) y mapea las cinco
+      herramientas del agente a `spot.tickerPrice` (+ `spot.ticker24hr`),
+      `spot.getAccount`, `spot.newOrder`, `spot.myTrades` y la herramienta de
+      transferencia descubierta en `transfer`/`asset-management`/`capital` (si el
+      scope no la incluye, la capacidad devuelve un resultado «no disponible» claro).
     - **Política (`src/agent/policy-binance.ts`):** allowlist de símbolos
       (`BINANCE_ALLOWED_SYMBOLS`), tope por orden (`BINANCE_MAX_ORDER_USD`) y tope
       diario por usuario/UTC (`BINANCE_MAX_DAILY_USD`). Cualquier violación produce
@@ -425,15 +432,27 @@ still follows:
 
         Dos formas de conectar, según `BINANCE_MCP_TOKEN`:
 
-        - **Sin token (recomendada para probar el flujo real):** se levanta el proxy
-          `mcp-remote https://agent.binance.com/mcp/agentic`. Si el proceso no puede
-          completar el handshake porque falta autenticar, la app NO degrada a
-          testnet: devuelve un error accionable que indica correr
+        - **Sin token:** se levanta el proxy `mcp-remote https://agent.binance.com/mcp/agentic`.
+          Si el proceso no puede completar el handshake porque falta autenticar, la app NO
+          degrada a testnet: devuelve un error accionable que indica correr
           `npx mcp-remote https://agent.binance.com/mcp/agentic` en otra terminal para
-          autenticarse en el navegador y recién después volver a intentar.
-        - **Con token:** se usa el transporte directo `StreamableHTTP`+`Bearer` de
-          `src/binance/mcp-remote-client.ts`. El token se inyecta en el header
-          `Authorization` y nunca se commitea.
+          autenticarse en el navegador y recién después volver a intentar. **Limitación:**
+          el proxy no puede completar el flujo OAuth contra Binance porque el servidor no
+          implementa registro dinámico de clientes (DCR); requiere un servidor compatible
+          con DCR o el token inyectado.
+        - **Con token (vía recomendada):** se usa el transporte directo
+          `StreamableHTTP`+`Bearer` de `src/binance/mcp-remote-client.ts`. El token se
+          inyecta en el header `Authorization` y nunca se commitea. Obtenelo con el helper
+          `scripts/binance-mcp-token.sh`, que lee el token que Codex CLI cachea en el
+          Keychain de macOS:
+
+          ```bash
+          # Una sola vez
+          codex mcp add binance https://agent.binance.com/mcp/agentic
+          codex mcp login binance
+          # Después, en cada corrida
+          BINANCE_MCP_TOKEN="$(scripts/binance-mcp-token.sh)" BINANCE_TOOLS_SOURCE=mcp npm run dev
+          ```
 
         Configurá en `.env`:
 
@@ -442,8 +461,9 @@ still follows:
         # opcional: apunta a otro servidor; por defecto usa el Agent OS real
         # BINANCE_MCP_URL=https://agent.binance.com/mcp/agentic
         # BINANCE_MCP_TRANSPORT=http
-        # Dejá vacío para el proxy mcp-remote; definí un token para el transporte directo
-        # BINANCE_MCP_TOKEN=
+        # Vía recomendada: inyectá el token del operador con el helper
+        # BINANCE_MCP_TOKEN="$(scripts/binance-mcp-token.sh)"
+        # (dejalo vacío solo si querés probar la vía proxy mcp-remote)
         BINANCE_TESTNET_API_KEY=...
         BINANCE_TESTNET_API_SECRET=...
         ```
@@ -466,7 +486,8 @@ still follows:
     | `BINANCE_MCP_URL` | `https://agent.binance.com/mcp/agentic` | URL http(s) del servidor MCP; con `BINANCE_TOOLS_SOURCE=mcp` toma ese valor por defecto. |
     | `BINANCE_MCP_TRANSPORT` | `http` | `http` o `sse` (solo aplica al transporte directo con token). |
     | `BINANCE_MCP_TOKEN` | — | Discriminador del modo `mcp`: si se define usa el transporte directo `StreamableHTTP`+`Bearer`; si queda vacío usa el proxy stdio `mcp-remote` (primer login OAuth en el navegador). |
-    | `BINANCE_TESTNET_API_KEY` | — | Clave API de testnet; requerida con `testnet`/`mcp`. Nunca se commitea. |
+    | `BINANCE_MCP_DEGRADE` | `true` | Cuando es `true` (default) los transportes `mcp` degradan a testnet ante un fallo de conexión. `false` muestra el error de conexión directamente y no exige credenciales de testnet. |
+    | `BINANCE_TESTNET_API_KEY` | — | Clave API de testnet; requerida con `testnet`/`mcp` (o `mcp` cuando el degrade está activo). Nunca se commitea. |
     | `BINANCE_TESTNET_API_SECRET` | — | Secreto de testnet; requerido con `testnet`/`mcp`. Nunca se commitea. |
 
     ## Verification and scripts

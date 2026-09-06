@@ -95,7 +95,7 @@ export class TestnetBinanceClient implements BinanceClient {
       symbol: toBinancePair(request.symbol),
       side: request.side,
       type: request.type,
-      quantity: request.quantity,
+      quantity: request.quantity ?? '',
       ...(request.price !== undefined ? { price: request.price } : {}),
     };
     const data = await this.signedPost('/api/v3/order', params);
@@ -185,7 +185,7 @@ export class TestnetBinanceClient implements BinanceClient {
       side: request.side,
       type: request.type,
       status: String(data.status ?? 'NEW') as BinanceOrder['status'],
-      quantity: request.quantity,
+      quantity: request.quantity ?? '',
       executedQuantity: String(data.executedQty ?? '0'),
       ...(request.price !== undefined ? { price: request.price } : {}),
       ...(data.avgPrice !== undefined ? { averagePrice: String(data.avgPrice) } : {}),

@@ -106,4 +106,39 @@ describe('readBinanceConfig', () => {
     expect(config.mcpToken).toBe('token');
     expect(config.mcpTransport).toBe('sse');
   });
+
+  it('requires testnet credentials when mcp degrade is enabled (default/unset)', () => {
+    expect(() => readBinanceConfig({ BINANCE_TOOLS_SOURCE: 'mcp' })).toThrow(/BINANCE_TESTNET_API_KEY/);
+    expect(() => readBinanceConfig({ BINANCE_TOOLS_SOURCE: 'mcp', BINANCE_MCP_DEGRADE: 'true' })).toThrow(/BINANCE_TESTNET_API_KEY/);
+  });
+
+  it('does not require testnet credentials when mcp degrade is disabled', () => {
+    const config = readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_DEGRADE: 'false',
+    });
+    expect(config.source).toBe('mcp');
+    expect(config.mcpDegrade).toBe(false);
+    expect(config.testnetApiKey).toBeUndefined();
+    expect(config.testnetApiSecret).toBeUndefined();
+  });
+
+  it('parses BINANCE_MCP_DEGRADE=true explicitly', () => {
+    const config = readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_DEGRADE: 'true',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    });
+    expect(config.mcpDegrade).toBe(true);
+  });
+
+  it('rejects an invalid BINANCE_MCP_DEGRADE fail-closed', () => {
+    expect(() => readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_DEGRADE: 'maybe',
+      BINANCE_TESTNET_API_KEY: 'key',
+      BINANCE_TESTNET_API_SECRET: 'secret',
+    })).toThrow(/BINANCE_MCP_DEGRADE/);
+  });
 });

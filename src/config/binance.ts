@@ -19,6 +19,8 @@ export type BinanceConfig = {
   mcpUrl?: string;
   mcpToken?: string;
   mcpTransport: 'http' | 'sse';
+  /** When false, mcp transports surface connect failures instead of degrading to testnet. */
+  mcpDegrade: boolean;
   testnetApiKey?: string;
   testnetApiSecret?: string;
   allowedSymbols: string[];
@@ -77,11 +79,23 @@ function parseMcpUrl(value: string | undefined): string {
   return value;
 }
 
-function parseMcpTransport(value: string | undefined): 'http' | 'sse' {
-  if (value === undefined || value.trim() === '') return 'http';
-  if (value === 'http' || value === 'sse') return value;
-  throw new Error('BINANCE_MCP_TRANSPORT must be either http or sse.');
-}
+    function parseMcpTransport(value: string | undefined): 'http' | 'sse' {
+      if (value === undefined || value.trim() === '') return 'http';
+      if (value === 'http' || value === 'sse') return value;
+      throw new Error('BINANCE_MCP_TRANSPORT must be either http or sse.');
+    }
+
+    /**
+     * BINANCE_MCP_DEGRADE controls whether the mcp transports fall back to testnet on
+     * a connect failure. It defaults to 'true' (degrade stays the default). An explicit
+     * 'false' lets an operator who only holds the OAuth token run mcp without testnet
+     * credentials and surface connect errors directly. Any other value is fail-closed.
+     */
+    function parseMcpDegrade(value: string | undefined): boolean {
+      if (value === undefined || value.trim() === '' || value === 'true') return true;
+      if (value === 'false') return false;
+      throw new Error('BINANCE_MCP_DEGRADE must be either true or false.');
+    }
 
 export function readBinanceConfig(environment: NodeJS.ProcessEnv = process.env): BinanceConfig {
   const rawSource = environment.BINANCE_TOOLS_SOURCE?.trim() || 'fixture';
@@ -94,6 +108,7 @@ export function readBinanceConfig(environment: NodeJS.ProcessEnv = process.env):
   const source = rawSource as BinanceToolsSource;
 
   const mcpTransport = parseMcpTransport(environment.BINANCE_MCP_TRANSPORT);
+  const mcpDegrade = parseMcpDegrade(environment.BINANCE_MCP_DEGRADE);
   const allowedSymbols = parseAllowedSymbols(environment.BINANCE_ALLOWED_SYMBOLS);
   const maxOrderUsd = positiveNumber(environment.BINANCE_MAX_ORDER_USD, 'BINANCE_MAX_ORDER_USD', DEFAULT_MAX_ORDER_USD);
   const maxDailyUsd = positiveNumber(environment.BINANCE_MAX_DAILY_USD, 'BINANCE_MAX_DAILY_USD', DEFAULT_MAX_DAILY_USD);
@@ -105,6 +120,7 @@ export function readBinanceConfig(environment: NodeJS.ProcessEnv = process.env):
     return {
       source,
       mcpTransport,
+      mcpDegrade,
       allowedSymbols,
       maxOrderUsd,
       maxDailyUsd,
@@ -119,17 +135,26 @@ export function readBinanceConfig(environment: NodeJS.ProcessEnv = process.env):
       mcpUrl: parseMcpUrl(optionalTrimmed(environment.BINANCE_MCP_URL) ?? DEFAULT_BINANCE_MCP_URL),
       mcpToken: optionalTrimmed(environment.BINANCE_MCP_TOKEN),
       mcpTransport,
+      mcpDegrade,
       allowedSymbols,
       maxOrderUsd,
       maxDailyUsd,
-      testnetApiKey: required(environment, 'BINANCE_TESTNET_API_KEY', 'when BINANCE_TOOLS_SOURCE=mcp (testnet fallback)'),
-      testnetApiSecret: required(environment, 'BINANCE_TESTNET_API_SECRET', 'when BINANCE_TOOLS_SOURCE=mcp (testnet fallback)'),
+      // Degrade is the default: it needs a testnet destination, so credentials are
+          // required. When an operator disables degrade (false) they run mcp against the
+          // OAuth token alone and surface connect errors instead of falling back.
+          testnetApiKey: mcpDegrade
+            ? required(environment, 'BINANCE_TESTNET_API_KEY', 'when BINANCE_TOOLS_SOURCE=mcp (testnet fallback)')
+            : optionalTrimmed(environment.BINANCE_TESTNET_API_KEY),
+          testnetApiSecret: mcpDegrade
+            ? required(environment, 'BINANCE_TESTNET_API_SECRET', 'when BINANCE_TOOLS_SOURCE=mcp (testnet fallback)')
+            : optionalTrimmed(environment.BINANCE_TESTNET_API_SECRET),
     };
   }
 
   return {
     source,
     mcpTransport,
+    mcpDegrade,
     allowedSymbols,
     maxOrderUsd,
     maxDailyUsd,

@@ -27,38 +27,46 @@ function fakeTestnet(): BinanceClient {
 function failingSession() {
   return {
     connect: vi.fn(async () => { throw new Error('mcp-remote failed to start'); }),
-    listTools: vi.fn(async () => ({ tools: [] })),
-    callTool: vi.fn(async () => ({})),
+    searchTools: vi.fn(async () => ({ tools: [] })),
+    executeTool: vi.fn(async () => ({})),
     close: vi.fn(async () => {}),
   };
 }
-
+    
 function authSession() {
   return {
     connect: vi.fn(async () => { throw new McpAuthRequiredError('https://agent.binance.com/mcp/agentic'); }),
-    listTools: vi.fn(async () => ({ tools: [] })),
-    callTool: vi.fn(async () => ({})),
+    searchTools: vi.fn(async () => ({ tools: [] })),
+    executeTool: vi.fn(async () => ({})),
     close: vi.fn(async () => {}),
   };
 }
-
+    
 function workingSession() {
-  const text = (value: Record<string, unknown>) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
+  const text = (value: unknown) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
+  const catalog: Record<string, Array<{ name: string }>> = {
+    'market-data': [{ name: 'spot.tickerPrice' }, { name: 'spot.ticker24hr' }],
+    account: [{ name: 'spot.getAccount' }, { name: 'spot.myTrades' }],
+    trade: [{ name: 'spot.newOrder' }],
+  };
   return {
     connect: vi.fn(async () => {}),
-    listTools: vi.fn(async () => ({ tools: [] })),
-    callTool: vi.fn(async (name: string) => {
-      if (name === 'get_market_quote') {
-        return text({ symbol: 'BTC', bid: '60000.00', ask: '60005.00', last: '60002.50', timestamp: '2026-01-01T00:00:00.000Z' });
+    searchTools: vi.fn(async (category: string) => ({ tools: catalog[category] ?? [] })),
+    executeTool: vi.fn(async (toolName: string, args: Record<string, unknown>) => {
+      if (toolName === 'spot.tickerPrice') {
+        return text({ symbol: args.symbol, price: '60002.50' });
       }
-      if (name === 'get_binance_balance') {
-        return text({ balances: [{ asset: 'USDT', free: '10000', locked: '0' }] });
+      if (toolName === 'spot.ticker24hr') {
+        return text({ symbol: args.symbol, bidPrice: '60000.00', askPrice: '60005.00', lastPrice: '60002.50', priceChangePercent: '2.50', closeTime: 1767225600000 });
       }
-      if (name === 'place_binance_order') {
-        return text({ orderId: 7, status: 'NEW', executedQty: '0', symbol: 'BTC' });
+      if (toolName === 'spot.getAccount') {
+        return text({ canTrade: true, balances: [{ asset: 'USDT', free: '10000', locked: '0' }] });
       }
-      if (name === 'get_binance_history') {
-        return text({ history: [] });
+      if (toolName === 'spot.newOrder') {
+        return text({ orderId: 7, status: 'NEW', executedQty: '0', symbol: args.symbol });
+      }
+      if (toolName === 'spot.myTrades') {
+        return text([]);
       }
       return text({});
     }),
@@ -165,6 +173,43 @@ describe('McpProxyBinanceClient auth-required path', () => {
 
     await expect(client.getMarketQuote('BTC')).rejects.toBeInstanceOf(McpAuthRequiredError);
     await expect(client.placeOrder({ symbol: 'BTC', side: 'BUY', type: 'MARKET', quantity: '0.01' })).rejects.toBeInstanceOf(McpAuthRequiredError);
+    expect(testnet.getMarketQuote).not.toHaveBeenCalled();
+  });
+});
+
+describe('McpProxyBinanceClient with degrade disabled', () => {
+  const degradeDisabledConfig = () =>
+    readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_DEGRADE: 'false',
+    });
+
+  it('surfaces the connection error instead of degrading when mcpDegrade is false', async () => {
+    const testnet = fakeTestnet();
+    const client = new McpProxyBinanceClient({
+      config: degradeDisabledConfig(),
+      createSession: async () => failingSession(),
+      createTestnetClient: () => testnet,
+      clock: () => '2026-01-01T00:00:00.000Z',
+    });
+
+    await expect(client.health()).rejects.toThrow('mcp-remote failed to start');
+    expect(client.degradation).toBeUndefined();
+    expect(testnet.getMarketQuote).not.toHaveBeenCalled();
+  });
+
+  it('still surfaces unavailable for OAuth-required when mcpDegrade is false', async () => {
+    const testnet = fakeTestnet();
+    const client = new McpProxyBinanceClient({
+      config: degradeDisabledConfig(),
+      createSession: async () => authSession(),
+      createTestnetClient: () => testnet,
+      clock: () => '2026-01-01T00:00:00.000Z',
+    });
+
+    const health = await client.health();
+    expect(health.status).toBe('unavailable');
+    expect(health.reason).toContain('npx mcp-remote');
     expect(testnet.getMarketQuote).not.toHaveBeenCalled();
   });
 });

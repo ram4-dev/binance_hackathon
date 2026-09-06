@@ -55,6 +55,15 @@ describe('createBinanceClient mcp selection', () => {
     expect(client).toBeInstanceOf(McpRemoteBinanceClient);
     expect(client.source).toBe('mcp');
   });
+
+  it('constructs an mcp client with degrade disabled and no testnet credentials', () => {
+    const client = createBinanceClient(readBinanceConfig({
+      BINANCE_TOOLS_SOURCE: 'mcp',
+      BINANCE_MCP_DEGRADE: 'false',
+    }));
+    expect(client.source).toBe('mcp');
+    expect(client).toBeInstanceOf(McpProxyBinanceClient);
+  });
 });
 
 describe('createBinanceClientFromEnv', () => {

@@ -27,17 +27,17 @@ function fakeTestnet(): BinanceClient {
 function failingSession() {
   return {
     connect: vi.fn(async () => { throw new Error('MCP server unreachable'); }),
-    listTools: vi.fn(async () => ({ tools: [] })),
-    callTool: vi.fn(async () => ({})),
+    searchTools: vi.fn(async () => ({ tools: [] })),
+    executeTool: vi.fn(async () => ({})),
     close: vi.fn(async () => {}),
   };
 }
-
+    
 function workingSession() {
   return {
     connect: vi.fn(async () => {}),
-    listTools: vi.fn(async () => ({ tools: [] })),
-    callTool: vi.fn(async () => ({ content: [{ type: 'text', text: '{}' }] })),
+    searchTools: vi.fn(async () => ({ tools: [] })),
+    executeTool: vi.fn(async () => ({ content: [{ type: 'text', text: '{}' }] })),
     close: vi.fn(async () => {}),
   };
 }
@@ -91,5 +91,45 @@ describe('McpRemoteBinanceClient degrade path', () => {
     await client.health();
     await client.close();
     expect(testnet.close).toHaveBeenCalled();
+  });
+});
+
+describe('McpRemoteBinanceClient with degrade disabled', () => {
+  it('surfaces the connection error instead of degrading when mcpDegrade is false', async () => {
+    const testnet = fakeTestnet();
+    const client = new McpRemoteBinanceClient({
+      config: readBinanceConfig({
+BINANCE_TOOLS_SOURCE: 'mcp',
+BINANCE_MCP_URL: 'https://mcp.example.com/mcp',
+BINANCE_MCP_DEGRADE: 'false',
+      }),
+      createSession: async () => failingSession(),
+      createTestnetClient: () => testnet,
+      clock: () => '2026-01-01T00:00:00.000Z',
+    });
+
+    await expect(client.health()).rejects.toThrow('MCP server unreachable');
+    expect(client.degradation).toBeUndefined();
+    expect(testnet.getMarketQuote).not.toHaveBeenCalled();
+  });
+
+  it('still degrades when mcpDegrade is explicitly true', async () => {
+    const testnet = fakeTestnet();
+    const client = new McpRemoteBinanceClient({
+      config: readBinanceConfig({
+BINANCE_TOOLS_SOURCE: 'mcp',
+BINANCE_MCP_URL: 'https://mcp.example.com/mcp',
+BINANCE_MCP_DEGRADE: 'true',
+BINANCE_TESTNET_API_KEY: 'key',
+BINANCE_TESTNET_API_SECRET: 'secret',
+      }),
+      createSession: async () => failingSession(),
+      createTestnetClient: () => testnet,
+      clock: () => '2026-01-01T00:00:00.000Z',
+    });
+
+    const health = await client.health();
+    expect(health.status).toBe('degraded');
+    expect(health.degradation?.to).toBe('testnet');
   });
 });

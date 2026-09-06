@@ -8,7 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { BinanceClient } from './client.js';
 import { TestnetBinanceClient } from './client.testnet.js';
-import { McpBinanceSessionAdapter, type McpBinanceSession } from './mcp-remote-client.js';
+import { decodeToolSearch, McpBinanceSessionAdapter, type McpBinanceSession } from './mcp-remote-client.js';
 import { DEFAULT_BINANCE_MCP_URL, type BinanceConfig } from '../config/binance.js';
 import {
   type BinanceBalance,
@@ -141,9 +141,19 @@ export function createMcpStdioSession(options: McpStdioSessionOptions): McpBinan
         throw error;
       }
     },
-    listTools: () => withDiagnostics(within(client.listTools(), callTimeoutMs, 'discovery')),
-    callTool: (name, args) => withDiagnostics(within(client.callTool({ name, arguments: args }), callTimeoutMs, 'call')),
-    close: () => client.close(),
+        searchTools: (category, cursor) =>
+          withDiagnostics(
+            within(
+              client.callTool({ name: 'tool_search', arguments: { category, ...(cursor ? { cursor } : {}) } }),
+              callTimeoutMs,
+              'tool_search',
+            ).then(decodeToolSearch),
+          ),
+        executeTool: (toolName, args) =>
+          withDiagnostics(
+            within(client.callTool({ name: 'tool_execute', arguments: { toolName, arguments: args } }), callTimeoutMs, 'tool_execute'),
+          ),
+        close: () => client.close(),
   };
 
   async function withDiagnostics<T>(operation: Promise<T>): Promise<T> {
@@ -249,6 +259,9 @@ export class McpProxyBinanceClient implements BinanceClient {
       this.backing = new McpBinanceSessionAdapter(session, this.clock);
     } catch (error) {
       if (error instanceof McpAuthRequiredError) {
+        throw error;
+      }
+      if (!this.options.config.mcpDegrade) {
         throw error;
       }
       const reason = error instanceof Error ? error.message : 'mcp-remote proxy connection failed.';
