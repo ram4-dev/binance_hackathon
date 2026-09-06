@@ -111,7 +111,7 @@ fi
 
 # Live-voice + recipient memory must be enabled for the E2E flow.
 grep -q '^LIVE_VOICE_ENABLED=true' .env || printf '\nLIVE_VOICE_ENABLED=true\n' >> .env
-grep -q '^RECIPIENT_MEMORY_ENABLED=true' .env || printf '\nRECIPIENT_MEMORY_ENABLED=true\nRECIPIENT_MEMORY_MODEL_CACHE=.cache/recipient-memory-model\nRECIPIENT_MEMORY_SCORE_THRESHOLD=0.78\nRECIPIENT_MEMORY_SCORE_MARGIN=0.08\n' >> .env
+grep -q '^RECIPIENT_MEMORY_ENABLED=true' .env || printf '\nRECIPIENT_MEMORY_ENABLED=true\nRECIPIENT_MEMORY_MODEL_CACHE=.cache/recipient-memory-model\nRECIPIENT_MEMORY_SCORE_THRESHOLD=0.78\nRECIPIENT_MEMORY_SCORE_MARGIN=0.08\nRECIPIENT_MEMORY_SEED_FILE=examples/recipient-memory.seed.json\n' >> .env
 grep -q '^CORS_ORIGINS=' .env || printf '\nCORS_ORIGINS=https://nana-wallet.localhost\n' >> .env
 grep -q '^LIVEKIT_AGENT_NAME=' .env || printf '\nLIVEKIT_AGENT_NAME=nani-agent\n' >> .env
 
