@@ -18,6 +18,7 @@ vi.mock("@livekit/agents", () => ({
 
 import { createRealtimeTools } from "../../src/livekit/realtime-tools/index.js";
 import type { RealtimeSearchContactsResult, RealtimeVoiceToolResult } from "../../src/livekit/realtime-tools/index.js";
+import { McpToolUnavailableError } from "../../src/binance/mcp-remote-client.js";
 import type { RecipientSearchResult } from "../../src/memory/service.js";
 
 type SearchContactsExecute = (input: { query: string }) => Promise<RealtimeSearchContactsResult>;
@@ -34,6 +35,15 @@ function financialTool(toolDef: unknown, index: number): FinancialTool {
     throw new Error(`test expected a financial tool at ${index}, got ${String(name)}`);
   const def = (toolDef as unknown as { parameters: FinancialTool["parameters"]; execute: FinancialTool["execute"] });
   return { name, parameters: def.parameters, execute: def.execute };
+}
+
+function toolByName(
+  tools: ReturnType<typeof createRealtimeTools>,
+  name: string,
+): { name: string; parameters: { parse(input: unknown): unknown; safeParse(input: unknown): { success: boolean } }; execute: (input: unknown) => Promise<unknown> } {
+  const tool = tools.find((entry) => (entry as { name?: string }).name === name);
+  if (!tool) throw new Error(`test expected tool ${name}, but it was not declared`);
+  return tool as unknown as { name: string; parameters: { parse(input: unknown): unknown; safeParse(input: unknown): { success: boolean } }; execute: (input: unknown) => Promise<unknown> };
 }
 
 describe("createRealtimeTools", () => {
@@ -350,3 +360,301 @@ yield { type: "turn-completed", result: { status: "cancelled", message: "Transfe
     expect(result).toMatchObject({ status: "cancelled" });
   });
 });
+
+describe("createRealtimeTools — Binance tools", () => {
+  it("declares the five Binance tools with strict schemas", () => {
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+    });
+    const names = tools.map((entry) => (entry as { name: string }).name);
+    for (const name of [
+      "get_market_quote",
+      "get_binance_balance",
+      "place_binance_order",
+      "get_binance_history",
+      "binance_internal_transfer",
+    ]) {
+      expect(names).toContain(name);
+    }
+  });
+
+  it("place_binance_order previews through the service and exposes symbol/quantity/value/orderType", async () => {
+    const service = {
+      previewBinance: vi.fn().mockResolvedValue({
+status: "confirmation_required",
+message: "Preparé la compra de 0.001 BTC. Confirmá para continuar.",
+preview: { venue: "binance", symbol: "BTC", quantity: "0.001", value: "60.005", orderType: "MARKET" },
+      }),
+    };
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+      service,
+    } as never);
+    const order = toolByName(tools, "place_binance_order");
+
+    const result = await order.execute({
+      symbol: "BTC",
+      side: "BUY",
+      orderType: "MARKET",
+      quantity: "0.001",
+    });
+
+    expect(service.previewBinance).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      input: expect.objectContaining({
+symbol: "BTC",
+side: "BUY",
+orderType: "MARKET",
+quantity: "0.001",
+dryRun: true,
+      }),
+    }));
+    expect(result).toMatchObject({
+      status: "confirmation_required",
+      symbol: "BTC",
+      quantity: "0.001",
+      value: "60.005",
+      orderType: "MARKET",
+    });
+  });
+
+  it("place_binance_order rejects a model-invented dryRun at the schema boundary", () => {
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+    });
+    const order = toolByName(tools, "place_binance_order");
+    expect(order.parameters.safeParse({
+      symbol: "BTC",
+      side: "BUY",
+      orderType: "MARKET",
+      quantity: "0.001",
+      dryRun: true,
+    }).success).toBe(false);
+    expect(order.parameters.safeParse({
+      symbol: "BTC",
+      side: "BUY",
+      orderType: "MARKET",
+      quantity: "0.001",
+      idempotencyKey: "model-key",
+    }).success).toBe(false);
+  });
+
+  it("binance_internal_transfer previews through the service", async () => {
+    const service = {
+      previewBinance: vi.fn().mockResolvedValue({
+status: "confirmation_required",
+message: "Preparé la transferencia de 1 BTC. Confirmá para continuar.",
+preview: { venue: "binance", symbol: "BTC", quantity: "1", value: "1" },
+      }),
+    };
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+      service,
+    } as never);
+    const transfer = toolByName(tools, "binance_internal_transfer");
+
+    const result = await transfer.execute({
+      asset: "BTC",
+      amount: "1",
+      from: "spot",
+      to: "funding",
+    });
+
+    expect(service.previewBinance).toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.objectContaining({
+asset: "BTC",
+amount: "1",
+from: "spot",
+to: "funding",
+dryRun: true,
+      }),
+    }));
+    expect(result).toMatchObject({ status: "confirmation_required", symbol: "BTC", quantity: "1", value: "1" });
+  });
+
+  it("binance_internal_transfer surfaces a typed unavailable when the service reports it", async () => {
+    const service = {
+      previewBinance: vi.fn().mockResolvedValue({
+status: "error",
+code: "binance_unavailable",
+message: "Binance internal transfer is not available in the granted scopes.",
+      }),
+    };
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+      service,
+    } as never);
+    const transfer = toolByName(tools, "binance_internal_transfer");
+
+    const result = await transfer.execute({
+      asset: "BTC",
+      amount: "1",
+      from: "spot",
+      to: "funding",
+    });
+
+    expect(result).toMatchObject({ status: "error", code: "binance_unavailable" });
+  });
+
+  it("get_market_quote returns the quote and normalizes the symbol", async () => {
+    const binance = {
+      getMarketQuote: vi.fn().mockResolvedValue({
+symbol: "BTC",
+bid: "60000.00",
+ask: "60005.00",
+last: "60002.50",
+timestamp: "2026-01-01T00:00:00.000Z",
+      }),
+    };
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+      binance,
+    } as never);
+    const quote = toolByName(tools, "get_market_quote");
+
+    const result = await quote.execute({ symbol: "btc" });
+
+    expect(binance.getMarketQuote).toHaveBeenCalledWith("BTC");
+    expect(result).toMatchObject({ status: "ok", symbol: "BTC", bid: "60000.00", ask: "60005.00", last: "60002.50" });
+  });
+
+  it("get_market_quote fails closed to binance_unavailable without a client", async () => {
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+    });
+    const quote = toolByName(tools, "get_market_quote");
+
+    const result = await quote.execute({ symbol: "BTC" });
+
+    expect(result).toMatchObject({ status: "error", code: "binance_unavailable" });
+  });
+
+  it("get_binance_balance returns balances and get_binance_history returns entries", async () => {
+    const binance = {
+      getBalance: vi.fn().mockResolvedValue([{ asset: "USDT", free: "10000", locked: "0", total: "10000" }]),
+      getHistory: vi.fn().mockResolvedValue([{ id: "h-1", type: "order", asset: "BTC", amount: "0.01", status: "FILLED", timestamp: "t" }]),
+    };
+    const tools = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: {} as never,
+      binance,
+    } as never);
+    const balance = toolByName(tools, "get_binance_balance");
+    const history = toolByName(tools, "get_binance_history");
+
+    const balanceResult = await balance.execute({});
+    const historyResult = await history.execute({});
+
+        expect(balanceResult).toMatchObject({ status: "ok", balances: [{ asset: "USDT", free: "10000" }] });
+        expect(historyResult).toMatchObject({ status: "ok", entries: [{ id: "h-1", asset: "BTC" }] });
+      });
+
+      it("place_binance_order surfaces a policy hold (symbol outside allowlist) with the spoken explanation", async () => {
+        const service = {
+          previewBinance: vi.fn().mockResolvedValue({
+            status: "error",
+            code: "binance_policy_hold",
+            message: "BTC no está en la lista permitida de símbolos.",
+          }),
+        };
+        const tools = createRealtimeTools({
+          conversationId: "conv-1",
+          userId: "binding-user",
+          wallet: {} as never,
+          service,
+        } as never);
+        const order = toolByName(tools, "place_binance_order");
+
+        const result = await order.execute({
+          symbol: "BTC",
+          side: "BUY",
+          orderType: "MARKET",
+          quantity: "0.001",
+        });
+
+        expect(result).toMatchObject({
+          status: "error",
+          code: "binance_policy_hold",
+          message: "BTC no está en la lista permitida de símbolos.",
+        });
+      });
+
+      it("place_binance_order surfaces a per-order cap rejection as a policy hold", async () => {
+        const service = {
+          previewBinance: vi.fn().mockResolvedValue({
+            status: "error",
+            code: "binance_policy_hold",
+            message: "La operación supera el límite diario permitido.",
+          }),
+        };
+        const tools = createRealtimeTools({
+          conversationId: "conv-1",
+          userId: "binding-user",
+          wallet: {} as never,
+          service,
+        } as never);
+        const order = toolByName(tools, "place_binance_order");
+
+        const result = await order.execute({
+          symbol: "BTC",
+          side: "BUY",
+          orderType: "MARKET",
+          quantity: "100",
+        });
+
+        expect(result).toMatchObject({ status: "error", code: "binance_policy_hold" });
+      });
+
+      it("place_binance_order fails closed to wallet_unavailable when no service is bound (never executes directly)", async () => {
+        const tools = createRealtimeTools({
+          conversationId: "conv-1",
+          userId: "binding-user",
+          wallet: {} as never,
+        });
+        const order = toolByName(tools, "place_binance_order");
+
+        const result = await order.execute({
+          symbol: "BTC",
+          side: "BUY",
+          orderType: "MARKET",
+          quantity: "0.001",
+        });
+
+        expect(result).toMatchObject({ status: "error", code: "wallet_unavailable" });
+      });
+
+      it("get_market_quote surfaces a typed transport unavailable from the client", async () => {
+        const unavailable = new McpToolUnavailableError("getMarketQuote", ["spot.ticker24hr"], []);
+        const binance = {
+          getMarketQuote: vi.fn().mockRejectedValue(unavailable),
+        };
+        const tools = createRealtimeTools({
+          conversationId: "conv-1",
+          userId: "binding-user",
+          wallet: {} as never,
+          binance,
+        } as never);
+        const quote = toolByName(tools, "get_market_quote");
+
+        const result = await quote.execute({ symbol: "BTC" });
+
+        expect(result).toMatchObject({ status: "error", code: "binance_unavailable" });
+        expect(result).toMatchObject({ message: unavailable.message });
+      });
+    });

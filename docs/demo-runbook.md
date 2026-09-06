@@ -166,6 +166,14 @@ and reads Sepolia/USD₮ metadata but never sends tokens.
     Usá el modo fixture (`BINANCE_TOOLS_SOURCE=fixture`) y, si no querés contactar
     un proveedor de modelo, `AGENT_RUNTIME=deterministic`.
 
+    Las cinco herramientas Binance están disponibles en el bucle de voz realtime: el
+    worker de LiveKit inyecta el cliente Binance, de modo que las herramientas de
+    lectura (`get_market_quote`, `get_binance_balance`, `get_binance_history`)
+    responden en vivo y las de dinero (`place_binance_order`, `binance_internal_transfer`)
+    pasan por el servicio con el flujo preview → confirm/cancel, sin saltear nunca la
+    política ni la confirmación. En el caso de la voz, la confirmación por frase
+    (`confirmo`) enruta la ejecución por la vía Binance.
+
     ### Preparación
 
     ```bash
@@ -215,6 +223,11 @@ and reads Sepolia/USD₮ metadata but never sends tokens.
     **Respuesta esperada:** `status: error` con código `binance_policy_hold`. El
     agente explica que USDT no está en la lista permitida.
 
+    > **Caveat del transfer interno:** si el transporte reporta que la herramienta de
+    > transferencia interna no está en los scopes concedidos (o que el proxy `mcp-remote`
+    > requiere OAuth), la voz muestra `status: error` con código `binance_unavailable` y
+    > el motivo del transporte, en lugar de un fallo genérico.
+
     > **Checklist:** verificar que el código es `binance_policy_hold` y que la
     > operación jamás se reporta como «ejecutada».
 
@@ -241,7 +254,16 @@ and reads Sepolia/USD₮ metadata but never sends tokens.
 
     ## Conexión real al Agent OS (modo `mcp`)
 
-    Esta sección documenta cómo conectar el canal Binance al Agent OS real en lugar de
+    ### Herramientas de Binance por voz (realtime)
+
+El canal de voz en vivo (OpenAI Realtime) expone las mismas herramientas de
+Binance que el canal de texto: cotización y saldo en lectura inmediata, y orden
+con el flujo preview → confirmación hablada. La transferencia interna entre
+wallets de la subcuenta puede reportarse como no disponible si el catálogo del
+MCP de Agent OS no la expone en los scopes otorgados; en ese caso el agente lo
+informa en voz alta en lugar de fallar silenciosamente.
+
+Esta sección documenta cómo conectar el canal Binance al Agent OS real en lugar de
     usar el fixture. **El primer paso es de solo lectura** (cotización y saldo); recién
     después, opcionalmente, una operación mínima con topes. Nunca se usan fondos de
     mainnet y nunca se commitea un token real.

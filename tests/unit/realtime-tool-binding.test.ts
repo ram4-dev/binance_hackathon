@@ -36,14 +36,19 @@ function call(name: string, args: Record<string, unknown>, callId = `call_${name
 }
 
 describe('realtime tool binding — declaration', () => {
-  it('declares exactly the 5 production tools with JSON Schema parameters', () => {
+  it('declares exactly the 10 production tools with JSON Schema parameters', () => {
     const stack = createRealtimeFixtureStack();
     const binding = createRealtimeToolBinding(stack.deps);
     const names = binding.tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'binance_internal_transfer',
       'cancel_transfer',
       'confirm_transfer',
       'get_balance',
+      'get_binance_balance',
+      'get_binance_history',
+      'get_market_quote',
+      'place_binance_order',
       'search_contacts',
       'send_token',
     ]);

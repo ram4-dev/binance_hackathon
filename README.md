@@ -446,7 +446,13 @@ still follows:
     - **Confirmación:** una operación de dinero se muestra primero como preview
       (`confirmation_required`). La confirmación explícita ejecuta la operación
       Binance; una cancelación o un hold de política jamás se informa como
-      «ejecutado».
+      «ejecutado». En el bucle de voz realtime el worker de LiveKit inyecta el
+      cliente Binance, de modo que las herramientas de lectura responden en vivo y
+      las de dinero pasan por el servicio con el mismo flujo preview → confirm/cancel.
+      Si el transporte reporta que la herramienta de transferencia interna no está
+      en los scopes concedidos (o que el proxy `mcp-remote` requiere OAuth), la voz
+      muestra `status: error` con código `binance_unavailable` y el motivo del
+      transporte, en lugar de un fallo genérico.
 
     ### Cómo ejecutar
 

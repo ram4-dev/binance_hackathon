@@ -1,15 +1,23 @@
 import { tool } from "@livekit/agents";
 import { z } from "zod";
 import { getWalletAgentConfig } from "../../agent/instructions.js";
+import {
+  isBinanceTransportUnavailableError,
+  binanceTransportUnavailableMessage,
+  type BinanceOrderInput,
+  type BinanceTransferInput,
+} from "../../agent/binance-definition.js";
+import type { BinanceClient } from "../../binance/client.js";
+import { normalizeBinanceSymbol } from "../../binance/types.js";
 import type { RecipientMemoryService, RecipientSearchResult } from "../../memory/service.js";
 import type { RecipientCandidate } from "../../memory/types.js";
 import type { WalletProvider } from "../../wallet/provider.js";
 import type { ConversationRepository } from "../../conversations/repository.js";
 import type { WalletConversationService } from "../../conversations/service.js";
-    import {
-      isBinanceTransferPreview,
-      type ConversationTurnResult,
-    } from "../../contracts/http.js";
+import {
+  isBinanceTransferPreview,
+  type ConversationTurnResult,
+} from "../../contracts/http.js";
 
 /**
  * Dependencies used to build the realtime voice tools for a single conversation.
@@ -21,9 +29,10 @@ import type { WalletConversationService } from "../../conversations/service.js";
  *
  * `service` is the per-binding conversation service built in the worker with the
  * binding user's memory runtime. The financial tools (`send_token`, `confirm_transfer`,
- * `cancel_transfer`) are a door to that service — they never reimplement guards. The
- * service emits state revisions through the shared `financialTasks`/progress publish
- * path, so the frontend card appears without any publish logic living in livekit.
+ * `cancel_transfer`, `place_binance_order`, `binance_internal_transfer`) are a door to
+ * that service — they never reimplement guards. The service emits state revisions
+ * through the shared `financialTasks`/progress publish path, so the frontend card
+ * appears without any publish logic living in livekit.
  */
 export type RealtimeToolsDependencies = {
   conversationId: string;
@@ -32,6 +41,13 @@ export type RealtimeToolsDependencies = {
   recipientMemory?: RecipientMemoryService;
   service?: WalletConversationService;
   conversations?: ConversationRepository;
+  /**
+   * Binance transport for the read-only market tools (quote/balance/history).
+   * The money-moving tools never read this: they go through the conversation
+   * service's persisted preview/decision state so policy and confirmation are
+   * never bypassed.
+   */
+  binance?: BinanceClient;
   /** Retained for seam stability; the service publishes revisions via financialTasks. */
   publishRevision?: (revision: number) => void;
 };
@@ -66,7 +82,8 @@ export type RealtimeBalanceResult = {
 /**
  * A model-facing (address-free) financial tool result. The recipient address only ever
  * travels inside the service machinery; the model receives amount/token/status/message
- * plus typed errors it can narrate in plain Spanish.
+ * plus typed errors it can narrate in plain Spanish. Binance previews carry
+ * symbol/quantity/value/orderType (never a free-form address).
  */
 export type RealtimeVoiceToolResult = {
   status: "confirmation_required" | "sent" | "cancelled" | "error";
@@ -75,7 +92,49 @@ export type RealtimeVoiceToolResult = {
   amount?: string;
   token?: string;
   transactionHash?: string;
+  symbol?: string;
+  quantity?: string;
+  value?: string;
+  orderType?: "MARKET" | "LIMIT";
 };
+
+export type RealtimeBinanceMarketQuoteResult =
+  | {
+      status: "ok";
+      symbol: string;
+      bid: string;
+      ask: string;
+      last: string;
+      timestamp: string;
+    }
+  | { status: "error"; code: "binance_unavailable"; message: string };
+
+export type RealtimeBinanceBalanceEntry = {
+  asset: string;
+  free: string;
+  locked: string;
+  total: string;
+};
+
+export type RealtimeBinanceBalanceResult =
+  | { status: "ok"; balances: RealtimeBinanceBalanceEntry[] }
+  | { status: "error"; code: "binance_unavailable"; message: string };
+
+export type RealtimeBinanceHistoryEntry = {
+  id: string;
+  type: string;
+  asset: string;
+  amount: string;
+  status: string;
+  timestamp: string;
+  detail?: string;
+};
+
+export type RealtimeBinanceHistoryResult =
+  | { status: "ok"; entries: RealtimeBinanceHistoryEntry[] }
+  | { status: "error"; code: "binance_unavailable"; message: string };
+
+const BINANCE_UNAVAILABLE_MESSAGE = "Binance is unavailable.";
 
 /**
  * REVIEW FIX V6: the voice `send_token` schema is preview-only and enforced by zod.
@@ -96,6 +155,52 @@ type SendTokenInput = z.infer<typeof sendTokenSchema>;
 
 const confirmationSchema = z.object({}).strict();
 const cancelSchema = z.object({}).strict();
+
+/**
+ * The Binance money-moving voice tools are preview-only at the schema boundary, exactly
+ * like `send_token`. The model can only express the operation shape — it can never invent
+ * a `dryRun` flag or an `idempotencyKey`, both of which are owned by the service machinery
+ * at preview time. `.strict()` rejects those and any other unknown field so a model that
+ * tries to force an execution bypass fails closed before reaching the service.
+ */
+const placeBinanceOrderSchema = z
+  .object({
+    symbol: z.string().trim().min(1),
+    side: z.enum(["BUY", "SELL"]),
+    orderType: z.enum(["MARKET", "LIMIT"]),
+    quantity: z.string().trim().min(1),
+    price: z.string().trim().min(1).optional(),
+  })
+  .strict();
+type PlaceBinanceOrderInput = z.infer<typeof placeBinanceOrderSchema>;
+
+const binanceInternalTransferSchema = z
+  .object({
+    asset: z.string().trim().min(1),
+    amount: z.string().trim().min(1),
+    from: z.string().trim().min(1),
+    to: z.string().trim().min(1),
+  })
+  .strict();
+type BinanceInternalTransferInput = z.infer<typeof binanceInternalTransferSchema>;
+
+const marketQuoteSchema = z
+  .object({
+    symbol: z.string().trim().min(1),
+  })
+  .strict();
+
+const binanceBalanceSchema = z
+  .object({
+    asset: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+const binanceHistorySchema = z
+  .object({
+    asset: z.string().trim().min(1).optional(),
+  })
+  .strict();
 
 /**
  * Deliberately strips every field that could leak a payee address or another user's
@@ -137,33 +242,35 @@ function toSearchContactsResult(
 /**
  * Map a service `ConversationTurnResult` onto an address-free tool result. The
  * `preview.recipient` address is deliberately dropped: the model never needs it and
- * the privacy invariant keeps the address book inside the machinery.
+ * the privacy invariant keeps the address book inside the machinery. A Binance venue
+ * preview is mapped to symbol/quantity/value/orderType (never an address).
  */
-    function toVoiceToolResult(result: ConversationTurnResult): RealtimeVoiceToolResult {
-      switch (result.status) {
-        case "confirmation_required": {
-          if (isBinanceTransferPreview(result.preview)) {
-            // The realtime voice loop only produces wallet previews today; a Binance
-            // venue preview is not a wallet transfer and never reaches this path.
-            return {
-              status: "error",
-              code: "internal_error",
-              message: result.message,
-            };
-          }
-          return {
-            status: "confirmation_required",
-            message: result.message,
-            amount: result.preview.amount,
-            token: result.preview.token,
-          };
-        }
-        case "sent":
-          return {
-            status: "sent",
-            message: result.message,
-            transactionHash: result.transaction?.transactionHash,
-          };
+function toVoiceToolResult(result: ConversationTurnResult): RealtimeVoiceToolResult {
+  switch (result.status) {
+    case "confirmation_required": {
+      if (isBinanceTransferPreview(result.preview)) {
+        return {
+          status: "confirmation_required",
+          message: result.message,
+          symbol: result.preview.symbol,
+          quantity: result.preview.quantity,
+          value: result.preview.value,
+          orderType: result.preview.orderType,
+        };
+      }
+      return {
+        status: "confirmation_required",
+        message: result.message,
+        amount: result.preview.amount,
+        token: result.preview.token,
+      };
+    }
+    case "sent":
+      return {
+        status: "sent",
+        message: result.message,
+        transactionHash: result.transaction?.transactionHash,
+      };
     case "cancelled":
       return { status: "cancelled", message: result.message };
     case "error":
@@ -312,5 +419,163 @@ export function createRealtimeTools(dependencies: RealtimeToolsDependencies) {
     execute: async (): Promise<RealtimeVoiceToolResult> => decideTransfer("cancel"),
   });
 
-  return [getBalanceTool, searchContactsTool, sendTokenTool, confirmTransferTool, cancelTransferTool] as const;
+  const getMarketQuoteTool = tool({
+    name: "get_market_quote",
+    description:
+      "Reads a live Binance market quote (bid, ask, last) for a base asset. Returns the normalized symbol. Fails closed to binance_unavailable when the Binance transport is not configured or unavailable.",
+    parameters: marketQuoteSchema,
+    execute: async ({ symbol }): Promise<RealtimeBinanceMarketQuoteResult> => {
+      if (!dependencies.binance) {
+        return { status: "error", code: "binance_unavailable", message: BINANCE_UNAVAILABLE_MESSAGE };
+      }
+      try {
+        const quote = await dependencies.binance.getMarketQuote(normalizeBinanceSymbol(symbol));
+        return {
+          status: "ok",
+          symbol: quote.symbol,
+          bid: quote.bid,
+          ask: quote.ask,
+          last: quote.last,
+          timestamp: quote.timestamp,
+        };
+      } catch (error) {
+        if (isBinanceTransportUnavailableError(error)) {
+          return {
+            status: "error",
+            code: "binance_unavailable",
+            message: binanceTransportUnavailableMessage(error),
+          };
+        }
+        return { status: "error", code: "binance_unavailable", message: BINANCE_UNAVAILABLE_MESSAGE };
+      }
+    },
+  });
+
+  const getBinanceBalanceTool = tool({
+    name: "get_binance_balance",
+    description:
+      "Reads Binance balances, optionally filtered to one asset. Fails closed to binance_unavailable when the Binance transport is not configured or unavailable.",
+    parameters: binanceBalanceSchema,
+    execute: async ({ asset }): Promise<RealtimeBinanceBalanceResult> => {
+      if (!dependencies.binance) {
+        return { status: "error", code: "binance_unavailable", message: BINANCE_UNAVAILABLE_MESSAGE };
+      }
+      try {
+        const balances = await dependencies.binance.getBalance(
+          asset ? normalizeBinanceSymbol(asset) : undefined,
+        );
+        return { status: "ok", balances };
+      } catch (error) {
+        if (isBinanceTransportUnavailableError(error)) {
+          return {
+            status: "error",
+            code: "binance_unavailable",
+            message: binanceTransportUnavailableMessage(error),
+          };
+        }
+        return { status: "error", code: "binance_unavailable", message: BINANCE_UNAVAILABLE_MESSAGE };
+      }
+    },
+  });
+
+  const getBinanceHistoryTool = tool({
+    name: "get_binance_history",
+    description:
+      "Reads Binance order and transfer history, optionally filtered to one asset. Fails closed to binance_unavailable when the Binance transport is not configured or unavailable.",
+    parameters: binanceHistorySchema,
+    execute: async ({ asset }): Promise<RealtimeBinanceHistoryResult> => {
+      if (!dependencies.binance) {
+        return { status: "error", code: "binance_unavailable", message: BINANCE_UNAVAILABLE_MESSAGE };
+      }
+      try {
+        const entries = await dependencies.binance.getHistory(
+          asset ? normalizeBinanceSymbol(asset) : undefined,
+        );
+        return { status: "ok", entries };
+      } catch (error) {
+        if (isBinanceTransportUnavailableError(error)) {
+          return {
+            status: "error",
+            code: "binance_unavailable",
+            message: binanceTransportUnavailableMessage(error),
+          };
+        }
+        return { status: "error", code: "binance_unavailable", message: BINANCE_UNAVAILABLE_MESSAGE };
+      }
+    },
+  });
+
+  const placeBinanceOrderTool = tool({
+    name: "place_binance_order",
+    description:
+      "Prepares a Binance spot order for explicit user confirmation. Takes the order shape (symbol, side, orderType, quantity, optional price). Never takes dryRun or an idempotency key — both are owned by the service. After the user agrees, call confirm_transfer.",
+    parameters: placeBinanceOrderSchema,
+    execute: async (input: PlaceBinanceOrderInput): Promise<RealtimeVoiceToolResult> => {
+      if (!dependencies.service) {
+        return {
+          status: "error",
+          code: "wallet_unavailable",
+          message: "The wallet service is unavailable.",
+        };
+      }
+      const orderInput: BinanceOrderInput = {
+        symbol: input.symbol,
+        side: input.side,
+        orderType: input.orderType,
+        quantity: input.quantity,
+        ...(input.price !== undefined ? { price: input.price } : {}),
+        dryRun: true,
+        idempotencyKey: crypto.randomUUID(),
+      };
+      const result = await dependencies.service.previewBinance({
+        conversationId: dependencies.conversationId,
+        userId: dependencies.userId,
+        input: orderInput,
+      });
+      return toVoiceToolResult(result);
+    },
+  });
+
+  const binanceInternalTransferTool = tool({
+    name: "binance_internal_transfer",
+    description:
+      "Prepares a Binance internal asset transfer for explicit user confirmation. Takes the transfer shape (asset, amount, from, to). Never takes dryRun or an idempotency key — both are owned by the service. After the user agrees, call confirm_transfer.",
+    parameters: binanceInternalTransferSchema,
+    execute: async (input: BinanceInternalTransferInput): Promise<RealtimeVoiceToolResult> => {
+      if (!dependencies.service) {
+        return {
+          status: "error",
+          code: "wallet_unavailable",
+          message: "The wallet service is unavailable.",
+        };
+      }
+      const transferInput: BinanceTransferInput = {
+        asset: input.asset,
+        amount: input.amount,
+        from: input.from,
+        to: input.to,
+        dryRun: true,
+        idempotencyKey: crypto.randomUUID(),
+      };
+      const result = await dependencies.service.previewBinance({
+        conversationId: dependencies.conversationId,
+        userId: dependencies.userId,
+        input: transferInput,
+      });
+      return toVoiceToolResult(result);
+    },
+  });
+
+  return [
+    getBalanceTool,
+    searchContactsTool,
+    sendTokenTool,
+    confirmTransferTool,
+    cancelTransferTool,
+    getMarketQuoteTool,
+    getBinanceBalanceTool,
+    getBinanceHistoryTool,
+    placeBinanceOrderTool,
+    binanceInternalTransferTool,
+  ] as const;
 }

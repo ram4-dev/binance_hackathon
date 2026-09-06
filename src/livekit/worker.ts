@@ -16,6 +16,7 @@ import {
 } from "../config/process.js";
 import { FinancialTaskRegistry } from "../conversations/financial-task-registry.js";
 import { createWalletConversationService } from "../conversations/service.js";
+import { createBinanceToolDependencies } from "../agent/binance-definition.js";
 import { getConfiguredRecipientMemoryService } from "../memory/runtime.js";
 import { createAgentSession } from "./create-agent-session.js";
 import { createRealtimeTools } from "./realtime-tools/index.js";
@@ -67,6 +68,12 @@ async function runJob(
     throw new Error("LiveKit worker requires LIVE_VOICE_BINDING_PUBLIC_KEY.");
   await ctx.connect(undefined, AutoSubscribe.AUDIO_ONLY);
   const participant = await ctx.waitForParticipant();
+  // Binance transport for the realtime voice loop. `createBinanceToolDependencies`
+  // resolves the client/usage/config from the environment (fixture by default) and is
+  // shared across every binding in this job. The read-only market tools use the client
+  // directly; the money-moving tools go through the service's injected deps so policy
+  // and confirmation are never bypassed.
+  const binanceDeps = createBinanceToolDependencies();
   const roomConversation = new RoomConversation({
     publicKey: config.publicKey,
     conversations: dependencies.conversations,
@@ -94,6 +101,7 @@ async function runJob(
         ...(memoryService ? { memory: { userId: binding.userId, service: memoryService } } : {}),
         financialTasks: dependencies.financialTasks,
         contextRenewal: dependencies.contextRenewal,
+        binanceDeps,
       });
       const tools = createRealtimeTools({
         conversationId: binding.conversationId,
@@ -101,6 +109,7 @@ async function runJob(
         wallet: dependencies.wallet,
         service: voiceService,
         conversations: dependencies.conversations,
+        binance: binanceDeps.client,
         ...(memoryService ? { recipientMemory: memoryService } : {}),
       });
       const created = createAgentSession({ tools });

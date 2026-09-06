@@ -3,6 +3,8 @@ import { binanceTransferPreviewSchema, type BinanceTransferPreview } from '../co
 import type { AgentToolDefinition, WalletAgentContext } from './definition.js';
 import type { BinanceClient } from '../binance/client.js';
 import { createBinanceClientFromEnv } from '../binance/client.js';
+import { McpToolUnavailableError } from '../binance/mcp-remote-client.js';
+import { McpAuthRequiredError } from '../binance/mcp-proxy-client.js';
 import { normalizeBinanceSymbol } from '../binance/types.js';
 import type { BinanceConfig } from '../config/binance.js';
 import { readBinanceConfig } from '../config/binance.js';
@@ -136,11 +138,41 @@ export function createBinanceTools(
   ];
 }
 
-export function createBinanceToolsFromEnv(
-  environment: NodeJS.ProcessEnv = process.env,
-): AgentToolDefinition<unknown, unknown>[] {
-  return createBinanceTools(createBinanceToolDependencies(environment));
-}
+    export function createBinanceToolsFromEnv(
+      environment: NodeJS.ProcessEnv = process.env,
+    ): AgentToolDefinition<unknown, unknown>[] {
+      return createBinanceTools(createBinanceToolDependencies(environment));
+    }
+
+    /**
+     * Clears the module-level Binance tool dependency singletons. Tests that change
+     * `BINANCE_*` env between cases call this so the next `createBinanceToolsFromEnv`
+     * rebuilds the client/usage/config/idempotency map from the current environment.
+     */
+    export function resetBinanceToolDependencies(): void {
+      clientSingleton = undefined;
+      usageSingleton = undefined;
+      configSingleton = undefined;
+      idempotencySingleton = undefined;
+    }
+
+    /**
+     * True when a thrown error is a typed Binance transport-unavailable condition:
+     * either the Agent OS tool is not in the granted scopes (`McpToolUnavailableError`)
+     * or the mcp-remote proxy requires OAuth (`McpAuthRequiredError`). These must be
+     * surfaced to the caller, never swallowed as a generic failure.
+     */
+    export function isBinanceTransportUnavailableError(error: unknown): boolean {
+      return error instanceof McpToolUnavailableError || error instanceof McpAuthRequiredError;
+    }
+
+    /** The human-readable message for a typed Binance transport-unavailable condition. */
+    export function binanceTransportUnavailableMessage(error: unknown): string {
+      if (error instanceof McpToolUnavailableError || error instanceof McpAuthRequiredError) {
+        return error.message;
+      }
+      return 'Binance is unavailable.';
+    }
 
 /**
  * Extracts a canonical Binance venue preview from a tool output. Returns null
