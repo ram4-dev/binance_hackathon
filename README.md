@@ -360,6 +360,13 @@ docker compose up -d livekit
 | `VITE_LIVEKIT_TOKEN_URL` (front) | Token endpoint on this API: `http://localhost:3000/v1/livekit/connection-details` |
 | `VITE_LIVEKIT_TOKEN_SERVER_ID` | (Fallback) LiveKit Cloud sandbox token server id |
 
+To run the full local stack (PostgreSQL + API + LiveKit voice worker) in docker
+and keep the front on the host, start the `dev` and `worker` profiles together:
+
+```bash
+BINANCE_MCP_TOKEN="$(scripts/binance-mcp-token.sh)" docker compose --profile dev --profile worker up -d --build
+```
+
 ## Configuration
 
 | Variable | Default | Meaning |

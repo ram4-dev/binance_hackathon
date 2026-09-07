@@ -272,6 +272,38 @@ El endpoint `/v1/livekit/connection-details` del API emite el token de la room
 con dispatch explícito del agente (`nani-agent`), con la misma forma JSON que
 el sandbox (`server_url`, `participant_token`, `room_name`, `participant_name`).
 
+### Stack completo en docker (API + worker)
+
+Para correr PostgreSQL + la API + el worker de voz de LiveKit dentro de docker
+(sin levantar la API en el host), usá los perfiles `dev` y `worker`. La API se
+publica en `127.0.0.1:3000` y el worker del bucle de voz corre dentro del
+network de compose.
+
+```bash
+BINANCE_MCP_TOKEN="$(scripts/binance-mcp-token.sh)" docker compose --profile dev --profile worker up -d --build
+```
+
+La base de datos apunta al servicio `db` del compose (`DATABASE_URL` se
+sobreescribe para los contenedores) y el worker registra contra LiveKit por el
+nombre del servicio (`ws://livekit:7880`), que podés fijar con
+`LIVEKIT_DOCKER_URL` en `.env`. `BINANCE_MCP_TOKEN` se inyecta desde el shell en
+cada `up` y nunca se commitea a `.env`. `BINANCE_TOOLS_SOURCE`, `BINANCE_MCP_DEGRADE`
+y `CORS_ORIGINS` siguen saliendo del `.env` (no se sobreescriben).
+
+Para volver al flujo con la API en el host, primero frená los procesos npm del
+host (Ctrl-C en sus terminales: `npm run dev` para la API, `livekit:dev` para el
+worker) y recién después levantá el stack docker. El front de Vite no se
+containeriza: sigue en el host (`:8090`) y apunta al LiveKit publicado en
+`127.0.0.1:7890`.
+
+```bash
+# 1) frená API/worker en el host (Ctrl-C en cada terminal)
+# 2) levantá el stack docker
+BINANCE_MCP_TOKEN="$(scripts/binance-mcp-token.sh)" docker compose --profile dev --profile worker up -d --build
+# 3) para frenarlo
+docker compose --profile dev --profile worker down
+```
+
 ### Herramientas de Binance por voz (realtime)
 
 El canal de voz en vivo (OpenAI Realtime) expone las mismas herramientas de

@@ -1,44 +1,116 @@
-services:
-  db:
-    image: pgvector/pgvector:0.8.1-pg16
-    environment:
-      POSTGRES_DB: wdk_agent
-      POSTGRES_USER: postgres
-      POSTGRES_HOST_AUTH_METHOD: trust
-    ports:
-      - "5433:5432"
+    services:
+      db:
+        image: pgvector/pgvector:0.8.1-pg16
+        environment:
+          POSTGRES_DB: wdk_agent
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - "5433:5432"
+        volumes:
+          - recipient_memory_postgres:/var/lib/postgresql/data
+          - ./docker/init/001-recipient-app.sql:/docker-entrypoint-initdb.d/001-recipient-app.sql:ro
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U postgres -d wdk_agent"]
+          interval: 5s
+          timeout: 5s
+          retries: 20
+    
+      # Self-hosted LiveKit signaling + media server, port layout adapted from the
+      # aleph local-livekit-selfhost setup (v1.13.6 + LIVEKIT_KEYS env) so it
+      # coexists with that stack on the same machine:
+      #   - signaling published on 127.0.0.1:7890 -> container 7880
+      #   - ICE-TCP 7892, RTC media UDP 7893-7903 (1:1 host:container)
+      livekit:
+        image: livekit/livekit-server:v1.13.6
+        command: --config /etc/livekit.yaml
+        environment:
+          # livekit-server does not expand ${VAR} inside its config file (verified
+          # against v1.13.6); the server reads keys from this env var instead.
+          LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+        volumes:
+          - ./docker/livekit.yaml:/etc/livekit.yaml:ro
+        ports:
+          - "127.0.0.1:7890:7880"
+          - "7892:7892/tcp"
+          - "7893-7903:7893-7903/udp"
+        healthcheck:
+          test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880/"]
+          interval: 10s
+          timeout: 5s
+          retries: 12
+    
+      # Local full-stack dev experience: `docker compose --profile dev up` starts
+      # PostgreSQL + the API. Kept behind `profiles: [dev]` so the CI/tests
+      # command `docker compose up -d db` keeps starting only the database.
+      backend:
+        restart: unless-stopped
+        profiles: ["dev"]
+        build:
+          context: .
+          dockerfile: Dockerfile
+          args:
+            # Bake the recipient-memory embedding model into the image so the API
+            # can answer memory searches without a network fetch at runtime:
+            #   EMBED_MODEL_PREFETCH=1 docker compose --profile dev up -d --build
+            EMBED_MODEL_PREFETCH: "${EMBED_MODEL_PREFETCH:-0}"
+        # Live voice / provider secrets (LIVEKIT_*, OPENAI_*, binding keys) come
+        # from the git-ignored root .env; the explicit environment below
+        # overrides anything it sets for the local docker stack (DB, bind).
+        env_file:
+          - .env
+        environment:
+          HOST: "0.0.0.0"
+          PORT: "3000"
+          # The git-ignored .env may point DATABASE_URL at host loopback
+          # (127.0.0.1:5433), unreachable from inside the container — the compose
+          # db service is authoritative here.
+          DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
+          # BINANCE_TOOLS_SOURCE, BINANCE_MCP_DEGRADE and CORS_ORIGINS stay on the
+          # git-ignored .env (via env_file) and are NOT overridden here. The API
+          # needs BINANCE_MCP_TOKEN at runtime for the mcp transport; it must be
+          # injected from the shell at compose up (never committed to .env):
+          #   BINANCE_MCP_TOKEN="$(scripts/binance-mcp-token.sh)" docker compose ...
+          BINANCE_MCP_TOKEN: "${BINANCE_MCP_TOKEN:-}"
+        ports:
+          - "127.0.0.1:${BACKEND_HOST_PORT:-3000}:3000"
+        depends_on:
+          db:
+            condition: service_healthy
+        command: ["api"]
+    
+      # LiveKit voice worker — same image, different entrypoint. Gated behind
+      # `profiles: [worker]` so it is never started by the dev profile. The worker
+      # reads required env (OPENAI_API_KEY, LIVEKIT_*, binding public key) from the
+      # git-ignored .env and fails closed (throws at startup) if any is absent.
+      voice-worker:
+        restart: unless-stopped
+        profiles: ["worker"]
+        build:
+          context: .
+          dockerfile: Dockerfile
+          args:
+            EMBED_MODEL_PREFETCH: "${EMBED_MODEL_PREFETCH:-0}"
+        # Same contract as backend: secrets from git-ignored .env; explicit
+        # environment wins for the local DB and fixture wallet mode.
+        env_file:
+          - .env
+        environment:
+          # Register with the self-hosted server over the compose network.
+          # LIVEKIT_API_KEY/SECRET, binding keys and OPENAI_API_KEY also come
+          # from the git-ignored .env via env_file.
+          LIVEKIT_URL: "${LIVEKIT_DOCKER_URL:-ws://livekit:7880}"
+          # Same local override as the backend: the git-ignored .env may point
+          # DATABASE_URL at host loopback, unreachable from inside the container.
+          DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
+          # WDK is fixture mode (repo rule): no live daemon socket, no unlock flow.
+          WDK_TOOLS_SOURCE: "${WDK_TOOLS_SOURCE:-fixture}"
+        depends_on:
+          db:
+            condition: service_healthy
+          livekit:
+            condition: service_healthy
+        command: ["worker"]
+    
     volumes:
-      - recipient_memory_postgres:/var/lib/postgresql/data
-      - ./docker/init/001-recipient-app.sql:/docker-entrypoint-initdb.d/001-recipient-app.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d wdk_agent"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  # Self-hosted LiveKit signaling + media server, port layout adapted from the
-  # aleph local-livekit-selfhost setup (v1.13.6 + LIVEKIT_KEYS env) so it
-  # coexists with that stack on the same machine:
-  #   - signaling published on 127.0.0.1:7890 -> container 7880
-  #   - ICE-TCP 7892, RTC media UDP 7893-7903 (1:1 host:container)
-  livekit:
-    image: livekit/livekit-server:v1.13.6
-    command: --config /etc/livekit.yaml
-    environment:
-      # livekit-server does not expand ${VAR} inside its config file (verified
-      # against v1.13.6); the server reads keys from this env var instead.
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
-    volumes:
-      - ./docker/livekit.yaml:/etc/livekit.yaml:ro
-    ports:
-      - "127.0.0.1:7890:7880"
-      - "7892:7892/tcp"
-      - "7893-7903:7893-7903/udp"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880/"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-volumes:
-  recipient_memory_postgres:
+      recipient_memory_postgres:
