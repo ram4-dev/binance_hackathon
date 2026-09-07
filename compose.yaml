@@ -16,21 +16,27 @@ services:
       timeout: 5s
       retries: 20
 
-  # Self-hosted LiveKit signaling + media server. The config file expands
-  # $LIVEKIT_API_KEY / $LIVEKIT_API_SECRET from the container environment,
-  # which docker compose interpolates from the project `.env`.
+  # Self-hosted LiveKit signaling + media server. livekit-server reads its
+  # whole config from the LIVEKIT_CONFIG env var; docker compose expands the
+  # key/secret from the project .env (livekit's own $VAR expansion does not
+  # apply to the keys section of the config file).
   livekit:
     image: livekit/livekit-server:v1.9.3
-    command: --config /etc/livekit/livekit.yaml
     environment:
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50200
+          use_external_ip: false
+          node_ip: 127.0.0.1
+        keys:
+          ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
     ports:
-      - "7880:7880"
-      - "7881:7881"
+      - "7890:7880"
+      - "7892:7881"
       - "50000-50200:50000-50200/udp"
-    volumes:
-      - ./docker/livekit.dev.yaml:/etc/livekit/livekit.yaml:ro
 
 volumes:
   recipient_memory_postgres:
