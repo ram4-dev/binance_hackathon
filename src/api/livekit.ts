@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   AccessToken,
@@ -24,6 +24,31 @@ type NormalizedConnectionRequest = {
   participantName?: string;
   agentName?: string;
 };
+
+/**
+ * LiveKit server 1.9.x rejects unknown proto fields; the SDK serializes a
+ * `restartPolicy` into the agent dispatch that this server version does not
+ * know. Re-sign the JWT with the field removed so the local server accepts it.
+ */
+function stripAgentDispatchRestartPolicy(jwt: string, apiSecret: string): string {
+  const [header, payload, signature] = jwt.split(".");
+  if (!header || !payload || !signature) return jwt;
+  const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+    roomConfig?: { agents?: Array<Record<string, unknown>> };
+  };
+  let changed = false;
+  for (const agent of json.roomConfig?.agents ?? []) {
+    if ("restartPolicy" in agent) {
+      delete agent.restartPolicy;
+      changed = true;
+    }
+  }
+  if (!changed) return jwt;
+  const cleanPayload = Buffer.from(JSON.stringify(json), "utf8").toString("base64url");
+  const signatureInput = `${header}.${cleanPayload}`;
+  const signature2 = createHmac("sha256", apiSecret).update(signatureInput).digest("base64url");
+  return `${signatureInput}.${signature2}`;
+}
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
@@ -108,7 +133,9 @@ export async function registerLiveKitRoutes(app: FastifyInstance): Promise<void>
       roomConfig.agents.push(new RoomAgentDispatch({ agentName }));
       token.roomConfig = roomConfig;
 
-      const participantToken = await token.toJwt();
+      // LiveKit server 1.9.x rejects unknown proto fields ("restartPolicy"),
+      // which the SDK serializes into the dispatch. Re-sign the JWT without it.
+      const participantToken = stripAgentDispatchRestartPolicy(await token.toJwt(), config.apiSecret);
 
       return reply.send({
         server_url: config.url,
