@@ -212,6 +212,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       wsURL: config.url,
       apiKey: config.apiKey,
       apiSecret: config.apiSecret,
+      // Explicit agent dispatch: the room join token requests `agentName`, so a
+      // self-hosted LiveKit server must register the worker under the same name.
+      agentName: config.agentName,
       drainTimeout: config.shutdownTimeoutMs,
       shutdownProcessTimeout: config.shutdownTimeoutMs,
     }),

@@ -254,7 +254,25 @@ and reads Sepolia/USD₮ metadata but never sends tokens.
 
     ## Conexión real al Agent OS (modo `mcp`)
 
-    ### Herramientas de Binance por voz (realtime)
+    ### LiveKit local (docker)
+
+El canal de voz corre contra un LiveKit self-hosted en docker, sin cuota de
+LiveKit Cloud:
+
+```bash
+docker compose up -d livekit   # signaling :7880, usa LIVEKIT_API_KEY/SECRET de .env
+```
+
+Variables (raíz `.env`): `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_API_KEY`,
+`LIVEKIT_API_SECRET`. Front (`apps/nana-wallet/.env.local`):
+`VITE_LIVEKIT_TOKEN_URL=http://localhost:3000/v1/livekit/connection-details`
+(reemplaza al sandbox `VITE_LIVEKIT_TOKEN_SERVER_ID`, que queda como fallback).
+
+El endpoint `/v1/livekit/connection-details` del API emite el token de la room
+con dispatch explícito del agente (`nani-agent`), con la misma forma JSON que
+el sandbox (`server_url`, `participant_token`, `room_name`, `participant_name`).
+
+### Herramientas de Binance por voz (realtime)
 
 El canal de voz en vivo (OpenAI Realtime) expone las mismas herramientas de
 Binance que el canal de texto: cotización y saldo en lectura inmediata, y orden

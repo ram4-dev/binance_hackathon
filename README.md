@@ -345,6 +345,21 @@ ID. The tool may show an exact staged address to the user for confirmation, but
 search output, embeddings, session inspection, and release evidence must not
 contain it.
 
+## Local LiveKit (voice self-hosted)
+
+Voice runs against a self-hosted LiveKit server in docker (no LiveKit Cloud quota):
+
+```bash
+docker compose up -d livekit
+```
+
+| Variable | Meaning |
+|----------|---------|
+| `LIVEKIT_URL` | Worker/signaling URL (local: `ws://localhost:7880`) |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Local dev keys (from `.env`) |
+| `VITE_LIVEKIT_TOKEN_URL` (front) | Token endpoint on this API: `http://localhost:3000/v1/livekit/connection-details` |
+| `VITE_LIVEKIT_TOKEN_SERVER_ID` | (Fallback) LiveKit Cloud sandbox token server id |
+
 ## Configuration
 
 | Variable | Default | Meaning |

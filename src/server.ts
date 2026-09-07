@@ -9,6 +9,7 @@ import { PostgresConversationRepository } from "./conversations/postgres-reposit
 import { createWalletConversationService } from "./conversations/service.js";
 import { readRecipientMemoryConfig } from "./config/env.js";
 import { registerVoiceRoutes } from "./api/voice.js";
+import { registerLiveKitRoutes } from "./api/livekit.js";
 import { createCoreDependencies } from "./runtime/dependencies.js";
 import { DemoIdentityProvider } from "./auth/identity.js";
 import { FinancialTaskRegistry } from "./conversations/financial-task-registry.js";
@@ -88,6 +89,7 @@ export function buildServer() {
       await core.wallet.close();
     });
   app.register(registerVoiceRoutes);
+  app.register(registerLiveKitRoutes);
 
   return app;
 }

@@ -18,21 +18,36 @@ export type LiveKitWebClientOptions = {
   onAgentState?: (state: string) => void;
   onConnectionLost?: () => void;
   onReconnected?: () => void;
-  room?: Room;
-  tokenServerId?: string;
-  agentName?: string;
-  participantIdentity?: string;
-};
+      room?: Room;
+      tokenUrl?: string;
+      tokenServerId?: string;
+      agentName?: string;
+      participantIdentity?: string;
+    };
 
-function readConfig(options: LiveKitWebClientOptions) {
-  const tokenServerId = options.tokenServerId ?? import.meta.env["VITE_LIVEKIT_TOKEN_SERVER_ID"];
-  const agentName = options.agentName ?? import.meta.env["VITE_LIVEKIT_AGENT_NAME"] ?? "nani-agent";
-  const participantIdentity =
-    options.participantIdentity ?? import.meta.env["VITE_LIVEKIT_PARTICIPANT_IDENTITY"];
-  if (!tokenServerId || !participantIdentity)
-    throw new Error("Live voice is not configured for this browser.");
-  return { tokenServerId, agentName, participantIdentity };
-}
+    function readConfig(options: LiveKitWebClientOptions) {
+      const tokenUrl = options.tokenUrl ?? import.meta.env["VITE_LIVEKIT_TOKEN_URL"];
+      const tokenServerId = options.tokenServerId ?? import.meta.env["VITE_LIVEKIT_TOKEN_SERVER_ID"];
+      const agentName = options.agentName ?? import.meta.env["VITE_LIVEKIT_AGENT_NAME"] ?? "nani-agent";
+      const participantIdentity =
+        options.participantIdentity ?? import.meta.env["VITE_LIVEKIT_PARTICIPANT_IDENTITY"];
+      if ((!tokenUrl && !tokenServerId) || !participantIdentity)
+        throw new Error("Live voice is not configured for this browser.");
+      return { tokenUrl, tokenServerId, agentName, participantIdentity };
+    }
+
+    /**
+     * Selects the token source for the room credential. A custom backend endpoint
+     * (self-hosted LiveKit) is preferred when `tokenUrl` is set; otherwise we fall
+     * back to the LiveKit Cloud development token server.
+     */
+    export function createLiveKitTokenSource(config: {
+      tokenUrl?: string;
+      tokenServerId?: string;
+    }) {
+      if (config.tokenUrl) return TokenSource.endpoint(config.tokenUrl);
+      return TokenSource.developmentTokenServer(config.tokenServerId!);
+    }
 
 function parseAgentState(participant: RemoteParticipant, onAgentState?: (state: string) => void) {
   const state = participant.attributes["lk.agent.state"];
@@ -72,7 +87,7 @@ export function createLiveKitWebClient(options: LiveKitWebClientOptions = {}): V
   async function connect() {
     const config = readConfig(options);
     const binding = await api.createLiveVoiceBinding(options.getConversationId?.() ?? undefined);
-    const tokenSource = TokenSource.developmentTokenServer(config.tokenServerId);
+    const tokenSource = createLiveKitTokenSource(config);
     const credentials = await tokenSource.fetch({
       roomName: `nani-${binding.conversationId}`,
       participantIdentity: config.participantIdentity,
