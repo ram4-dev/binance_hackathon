@@ -26,9 +26,10 @@ type NormalizedConnectionRequest = {
 };
 
 /**
- * LiveKit server 1.9.x rejects unknown proto fields; the SDK serializes a
- * `restartPolicy` into the agent dispatch that this server version does not
- * know. Re-sign the JWT with the field removed so the local server accepts it.
+ * LiveKit server 1.9.x rejects unknown proto fields; the SDK serializes extra
+ * fields (`restartPolicy`, `deployment`, `attributes`) into the agent dispatch
+ * that this server version does not know. Re-sign the JWT with the dispatch
+ * reduced to the fields the server proto accepts, so it validates.
  */
 function stripAgentDispatchRestartPolicy(jwt: string, apiSecret: string): string {
   const [header, payload, signature] = jwt.split(".");
@@ -38,8 +39,12 @@ function stripAgentDispatchRestartPolicy(jwt: string, apiSecret: string): string
   };
   let changed = false;
   for (const agent of json.roomConfig?.agents ?? []) {
-    if ("restartPolicy" in agent) {
-      delete agent.restartPolicy;
+    const accepted: Record<string, unknown> = { agentName: agent.agentName ?? "" };
+    if (typeof agent.metadata === "string" && agent.metadata) {
+      accepted.metadata = agent.metadata;
+    }
+    if (JSON.stringify(agent) !== JSON.stringify(accepted)) {
+      json.roomConfig!.agents = json.roomConfig!.agents!.map((a) => (a === agent ? accepted : a));
       changed = true;
     }
   }

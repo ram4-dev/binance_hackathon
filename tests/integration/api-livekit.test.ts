@@ -59,8 +59,10 @@ describe("POST /v1/livekit/connection-details", () => {
     const roomConfig = payload.roomConfig as { agents?: { agentName?: string }[] };
     expect(roomConfig.agents?.[0]?.agentName).toBe("nani-agent");
     // LiveKit server 1.9.x rejects unknown proto fields: the emitted dispatch
-    // must not carry the SDK's newer `restartPolicy` field.
+    // must carry only fields the server proto knows.
     expect(JSON.stringify(roomConfig)).not.toContain("restartPolicy");
+    expect(JSON.stringify(roomConfig)).not.toContain("deployment");
+    expect(JSON.stringify(roomConfig)).not.toContain('"attributes"');
     await app.close();
   });
 
