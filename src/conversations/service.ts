@@ -1044,7 +1044,6 @@ function sanitizeResult(result: ConversationTurnResult): ConversationTurnResult 
     'broadcast_in_progress', 'broadcast_uncertain', 'transaction_receipt_invalid', 'transfer_reverted',
     'invalid_tool_result', 'wallet_unavailable', 'internal_error',
   ]);
-  const code = supported.has(result.code as ConversationErrorCode) ? result.code as ConversationErrorCode : 'internal_error';
   return { status: 'error', code, message: safeErrorMessage(code) };
 }
 
