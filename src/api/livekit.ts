@@ -37,14 +37,21 @@ function stripAgentDispatchRestartPolicy(jwt: string, apiSecret: string): string
   const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
     roomConfig?: { agents?: Array<Record<string, unknown>> };
   };
+  // Reduce the whole RoomConfiguration to what the server proto accepts: the
+  // SDK emits extra fields (departureTimeout, syncStreams, tags, ...) that
+  // LiveKit 1.9.x proto does not know.
   let changed = false;
-  for (const agent of json.roomConfig?.agents ?? []) {
-    const accepted: Record<string, unknown> = { agentName: agent.agentName ?? "" };
-    if (typeof agent.metadata === "string" && agent.metadata) {
-      accepted.metadata = agent.metadata;
-    }
-    if (JSON.stringify(agent) !== JSON.stringify(accepted)) {
-      json.roomConfig!.agents = json.roomConfig!.agents!.map((a) => (a === agent ? accepted : a));
+  if (json.roomConfig) {
+    const acceptedAgents = (json.roomConfig.agents ?? []).map((agent) => {
+      const accepted: Record<string, unknown> = { agentName: agent.agentName ?? "" };
+      if (typeof agent.metadata === "string" && agent.metadata) {
+        accepted.metadata = agent.metadata;
+      }
+      return accepted;
+    });
+    const acceptedConfig = { agents: acceptedAgents };
+    if (JSON.stringify(json.roomConfig) !== JSON.stringify(acceptedConfig)) {
+      json.roomConfig = acceptedConfig;
       changed = true;
     }
   }
