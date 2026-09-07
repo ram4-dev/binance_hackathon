@@ -1030,7 +1030,6 @@ function spokenResultMessage(result: ConversationTurnResult, language: 'es' | 'e
 function errorResult(error: unknown): Extract<ConversationTurnResult, { status: 'error' }> {
   if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
     const code = error.code as ConversationErrorCode;
-    const code = supported.has(result.code as ConversationErrorCode) ? result.code as ConversationErrorCode : 'internal_error';
     return { status: 'error', code, message: safeErrorMessage(code) };
   }
   return { status: 'error', code: 'internal_error', message: safeErrorMessage('internal_error') };
@@ -1045,6 +1044,7 @@ function sanitizeResult(result: ConversationTurnResult): ConversationTurnResult 
     'broadcast_in_progress', 'broadcast_uncertain', 'transaction_receipt_invalid', 'transfer_reverted',
     'invalid_tool_result', 'wallet_unavailable', 'internal_error',
   ]);
+  const code = supported.has(result.code as ConversationErrorCode) ? result.code as ConversationErrorCode : 'internal_error';
   return { status: 'error', code, message: safeErrorMessage(code) };
 }
 
