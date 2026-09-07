@@ -16,27 +16,29 @@ services:
       timeout: 5s
       retries: 20
 
-  # Self-hosted LiveKit signaling + media server. livekit-server reads its
-  # whole config from the LIVEKIT_CONFIG env var; docker compose expands the
-  # key/secret from the project .env (livekit's own $VAR expansion does not
-  # apply to the keys section of the config file).
+  # Self-hosted LiveKit signaling + media server, port layout adapted from the
+  # aleph local-livekit-selfhost setup (v1.13.6 + LIVEKIT_KEYS env) so it
+  # coexists with that stack on the same machine:
+  #   - signaling published on 127.0.0.1:7890 -> container 7880
+  #   - ICE-TCP 7892, RTC media UDP 7893-7903 (1:1 host:container)
   livekit:
-    image: livekit/livekit-server:v1.9.3
+    image: livekit/livekit-server:v1.13.6
+    command: --config /etc/livekit.yaml
     environment:
-      LIVEKIT_CONFIG: |
-        port: 7880
-        rtc:
-          tcp_port: 7881
-          port_range_start: 50000
-          port_range_end: 50200
-          use_external_ip: false
-          node_ip: 127.0.0.1
-        keys:
-          ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+      # livekit-server does not expand ${VAR} inside its config file (verified
+      # against v1.13.6); the server reads keys from this env var instead.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./docker/livekit.yaml:/etc/livekit.yaml:ro
     ports:
-      - "7890:7880"
-      - "7892:7881"
-      - "50000-50200:50000-50200/udp"
+      - "127.0.0.1:7890:7880"
+      - "7892:7892/tcp"
+      - "7893-7903:7893-7903/udp"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
 volumes:
   recipient_memory_postgres:

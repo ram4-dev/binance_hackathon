@@ -1,0 +1,30 @@
+# Self-hosted LiveKit for local development, port layout adapted from the
+# aleph-hackathon.local-livekit-selfhost setup (verified working) so both
+# stacks can coexist on one machine:
+#   - signaling published on host 7890 -> container 7880
+#   - ICE-TCP on container 7892, published 1:1 on 7892
+#   - RTC media UDP container 7893-7903, published 1:1 on 7893-7903
+# Privacy-auditable by construction: no egress, no recording, no webhook
+# sections exist in this file — audio stays on loopback.
+port: 7880
+rtc:
+  # Single small UDP mux range for local development media.
+  # NOTE: `port_range_start/end` keys are NOT honored by v1.13.6 (verified
+  # against the server log: Start/End stayed 0); the honored key is
+  # rtc.udp_port as a "start-end" string.
+  udp_port: "7893-7903"
+  # Loopback demo topology: advertise 127.0.0.1 so the HOST browser can
+  # reach the published media ports. Container clients still use the
+  # interface host candidates, so both paths work.
+  # No TURN, no TCP relay override, no egress.
+  use_external_ip: false
+  node_ip: "127.0.0.1"
+  # Also advertise the container interface IP so compose-network clients
+  # keep their host-candidate path to media.
+  advertise_internal_ip: true
+  # ICE-TCP fallback for the browser; published 1:1 on the host.
+  tcp_port: 7892
+# Credentials: livekit-server does not expand ${VAR} inside its config file
+# (verified against v1.13.6), so the key/secret pair is injected by the compose
+# service via LIVEKIT_KEYS using the same .env credentials the API and worker
+# use. No secret is ever stored in this tracked file.
