@@ -10,6 +10,7 @@ import { createWalletConversationService } from "./conversations/service.js";
 import { readRecipientMemoryConfig } from "./config/env.js";
 import { registerVoiceRoutes } from "./api/voice.js";
 import { registerLiveKitRoutes } from "./api/livekit.js";
+import { registerMeRoutes } from "./api/me.js";
 import { createCoreDependencies } from "./runtime/dependencies.js";
 import { DemoIdentityProvider } from "./auth/identity.js";
 import { FinancialTaskRegistry } from "./conversations/financial-task-registry.js";
@@ -90,6 +91,7 @@ export function buildServer() {
     });
   app.register(registerVoiceRoutes);
   app.register(registerLiveKitRoutes);
+  app.register(registerMeRoutes);
 
   return app;
 }
