@@ -36,9 +36,9 @@
     "eval:voice:dataset": "tsx evals/voice/stt/download-dataset.ts"
   },
   "dependencies": {
-    "@circle-fin/developer-controlled-wallets": "10.8.0",
     "@ai-sdk/mcp": "2.0.36",
     "@ai-sdk/openai-compatible": "3.0.35",
+    "@circle-fin/developer-controlled-wallets": "10.8.0",
     "@fastify/cors": "^11.3.0",
     "@huggingface/transformers": "4.2.0",
     "@livekit/agents": "^1.7.1",
@@ -60,6 +60,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@livekit/rtc-node": "^0.13.34",
     "@types/node": "22.15.3",
     "@types/pg": "8.23.1",
     "eslint": "^9.32.0",

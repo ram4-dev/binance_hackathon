@@ -59,6 +59,19 @@ export function createLiveKitWorkerRuntime(input?: {
   };
 }
 
+
+/** Polls the room's remote participants until the given identity joins. Unlike
+ * JobContext.waitForParticipant, this accepts AGENT-kind participants so the
+ * programmatic E2E participant (rtc-node) can drive the voice flow. */
+async function waitForParticipantByIdentity(room: { remoteParticipants: Map<string, { identity: string }> }, identity: string): Promise<{ identity: string }> {
+  for (let i = 0; i < 240; i++) {
+    const found = [...room.remoteParticipants.values()].find((p) => p.identity === identity);
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`E2E participant ${identity} did not join the room within the timeout.`);
+}
+
 async function runJob(
   ctx: JobContext,
   config: WorkerProcessConfig,
@@ -67,7 +80,14 @@ async function runJob(
   if (!config.publicKey)
     throw new Error("LiveKit worker requires LIVE_VOICE_BINDING_PUBLIC_KEY.");
   await ctx.connect(undefined, AutoSubscribe.AUDIO_ONLY);
-  const participant = await ctx.waitForParticipant();
+  // Test seam: the programmatic voice E2E participant comes from @livekit/rtc-node,
+  // which always advertises ParticipantKind.AGENT and would be filtered out by
+  // waitForParticipant. NANA_VOICE_E2E_IDENTITY opts that named participant in
+  // (explicit allowlist; production behavior unchanged when the env is unset).
+  const e2eIdentity = process.env.NANA_VOICE_E2E_IDENTITY?.trim();
+  const participant = e2eIdentity
+    ? await waitForParticipantByIdentity(ctx.room, e2eIdentity)
+    : await ctx.waitForParticipant();
   // Binance transport for the realtime voice loop. `createBinanceToolDependencies`
   // resolves the client/usage/config from the environment (fixture by default) and is
   // shared across every binding in this job. The read-only market tools use the client
@@ -103,6 +123,7 @@ async function runJob(
         contextRenewal: dependencies.contextRenewal,
         binanceDeps,
       });
+      console.error('[diag] job entry: creating realtime tools');
       const tools = createRealtimeTools({
         conversationId: binding.conversationId,
         userId: binding.userId,
@@ -137,10 +158,12 @@ async function runJob(
           },
         );
       });
+      console.error('[diag] job entry: creating agent session');
       session = created.session;
       sessionClosed = new Promise<void>((resolve) =>
         created.session.once(AgentSessionEventTypes.Close, () => resolve()),
       );
+      console.error('[diag] job entry: awaiting session.start (realtime connect to OpenAI)');
       await created.session.start({
         agent: created.agent,
         room: ctx.room,
