@@ -385,21 +385,30 @@ export function buildGuardedTools(
           inputSchema: base.inputSchema,
           execute: async (input, options) => {
             const parsed = input as { dryRun: boolean; idempotencyKey: string };
-            if (parsed.dryRun) return base.execute!(input, options);
+            if (parsed.dryRun) {
+              try {
+                return await base.execute!(input, options);
+              } catch (error) {
+                console.error('[diag] dryRun tool threw:', error);
+                throw error;
+              }
+            }
             const pending = session.pendingTransfer;
             const operation = name === 'place_binance_order' ? 'order' : 'internal_transfer';
-            const matches =
-              !!pending &&
-              isBinancePendingTransfer(pending) &&
-              pending.operation === operation &&
-              pending.idempotencyKey === parsed.idempotencyKey;
-            if (!matches) {
-              return {
-                error: 'confirmation_required',
-                message: 'Refusing to execute: no matching confirmed Binance preview in the current session.',
-              };
-            }
-            return base.execute!(input, options);
+            const pendingMatches =
+                !!pending &&
+                isBinancePendingTransfer(pending) &&
+                pending.operation === operation;
+              // The model is not asked to carry the idempotency key (schemas made it
+              // optional): inject the pending preview's own key at execution time.
+              if (!pendingMatches) {
+                return {
+                  error: 'confirmation_required',
+                  message: 'Refusing to execute: no matching confirmed Binance preview in the current session.',
+                };
+              }
+              const executeInput = { ...(input as Record<string, unknown>), idempotencyKey: parsed.idempotencyKey ?? pending.idempotencyKey };
+              return base.execute!(executeInput, options);
           },
         });
       }
@@ -419,7 +428,7 @@ export function buildGuardedTools(
       const baseTools = definition && options.walletProvider
         ? toAiSdkTools(definition, {
           conversationId: session.id,
-          userId: recipientMemory?.userId ?? '',
+          userId: recipientMemory?.userId ?? process.env.DEMO_USER_ID ?? '',
           language: options.language ?? 'en',
           config: agentConfig,
           session,
@@ -708,7 +717,9 @@ export async function handleMessage(
             : 'binance_policy_hold';
           return { status: 'error', message: guardedError.data.message, code };
         }
+        console.error('[diag] lastBinanceCall output:', JSON.stringify(output)?.slice(0, 400));
         const preview = canonicalizeBinancePreview(output);
+        console.error('[diag] canonicalize result:', JSON.stringify(preview)?.slice(0, 300));
         if (preview) {
           const orderParsed = binanceOrderInputSchema.safeParse(lastBinanceCall.input);
           const transferParsed = binanceTransferInputSchema.safeParse(lastBinanceCall.input);

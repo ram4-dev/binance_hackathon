@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { binanceTransferPreviewSchema, type BinanceTransferPreview } from '../contracts/http.js';
 import type { AgentToolDefinition, WalletAgentContext } from './definition.js';
@@ -43,7 +44,7 @@ export const binanceOrderInputSchema = z.object({
   quantity: z.string().trim().min(1),
   price: z.string().trim().min(1).optional(),
   dryRun: z.boolean(),
-  idempotencyKey: z.string().trim().min(1),
+  idempotencyKey: z.string().trim().min(1).optional(),
 });
 export type BinanceOrderInput = z.infer<typeof binanceOrderInputSchema>;
 
@@ -53,7 +54,7 @@ export const binanceTransferInputSchema = z.object({
   from: z.string().trim().min(1),
   to: z.string().trim().min(1),
   dryRun: z.boolean(),
-  idempotencyKey: z.string().trim().min(1),
+  idempotencyKey: z.string().trim().min(1).optional(),
 });
 export type BinanceTransferInput = z.infer<typeof binanceTransferInputSchema>;
 
@@ -213,6 +214,7 @@ async function executeBinanceOrder(
   clock: () => Date,
 ): Promise<unknown> {
   const parsed = binanceOrderInputSchema.parse(input);
+      const idempotencyKey = parsed.idempotencyKey ?? randomUUID();
   const symbol = normalizeBinanceSymbol(parsed.symbol);
   const quote = await deps.client.getMarketQuote(symbol);
   const referencePrice =
@@ -245,18 +247,23 @@ async function executeBinanceOrder(
       quantity: parsed.quantity,
       value,
       orderType: parsed.orderType,
+        idempotencyKey,
     };
   }
 
-  const cacheKey = `order:${parsed.idempotencyKey}`;
+  const cacheKey = `order:${idempotencyKey}`;
   const cached = deps.idempotency?.get(cacheKey);
   if (cached !== undefined) return cached;
 
+  // MARKET BUY spends quote currency: pass quoteOrderQty so Binance rounds the
+  // base quantity itself (avoids LOT_SIZE filter rejections).
+  const quoteOrderQty = parsed.side === 'BUY' && parsed.orderType === 'MARKET' ? value : undefined;
   const result = await deps.client.placeOrder({
     symbol,
     side: parsed.side,
     type: parsed.orderType,
-    quantity: parsed.quantity,
+    quantity: quoteOrderQty === undefined ? parsed.quantity : undefined,
+    ...(quoteOrderQty !== undefined ? { quoteOrderQty } : {}),
     ...(parsed.price !== undefined ? { price: parsed.price } : {}),
   });
   deps.idempotency?.set(cacheKey, result);
@@ -270,6 +277,7 @@ async function executeBinanceTransfer(
   deps: BinanceToolDependencies,
 ): Promise<unknown> {
   const parsed = binanceTransferInputSchema.parse(input);
+      const idempotencyKey = parsed.idempotencyKey ?? randomUUID();
   const asset = normalizeBinanceSymbol(parsed.asset);
   const decision = evaluateBinanceTransferPolicy({ asset, amount: parsed.amount }, deps.config);
   if (!decision.ok) return holdResult(decision);
@@ -281,10 +289,11 @@ async function executeBinanceTransfer(
       symbol: asset,
       quantity: parsed.amount,
       value: parsed.amount,
+        idempotencyKey,
     };
   }
 
-  const cacheKey = `transfer:${parsed.idempotencyKey}`;
+  const cacheKey = `transfer:${idempotencyKey}`;
   const cached = deps.idempotency?.get(cacheKey);
   if (cached !== undefined) return cached;
 

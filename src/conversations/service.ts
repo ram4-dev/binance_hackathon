@@ -466,6 +466,7 @@ export interface WalletConversationService {
             try {
               output = await binanceTool.execute({ ...input.input, dryRun: true }, context);
             } catch (error) {
+              console.error('[diag] previewBinance execute threw:', error);
               if (isBinanceTransportUnavailableError(error)) {
                 return { status: 'error', code: 'binance_unavailable', message: binanceTransportUnavailableMessage(error) };
               }
@@ -478,6 +479,7 @@ export interface WalletConversationService {
             }
 
             const preview = canonicalizeBinancePreview(output);
+            console.error('[diag] previewBinance canonicalize:', JSON.stringify(output)?.slice(0, 300));
             if (!preview) return errorResult(errorFromCode('invalid_tool_result'));
 
             const binanceInput = input.input;
@@ -485,7 +487,7 @@ export interface WalletConversationService {
               venue: 'binance',
               operation,
               preview,
-              idempotencyKey: binanceInput.idempotencyKey,
+              idempotencyKey: (output as { idempotencyKey?: string }).idempotencyKey ?? binanceInput.idempotencyKey ?? '',
               request: binanceInput as Record<string, unknown>,
             });
             await publish(stateEvent(state));
@@ -815,7 +817,7 @@ export interface WalletConversationService {
             venue: 'binance',
             operation,
             preview: binancePreview,
-            idempotencyKey: binanceInput.idempotencyKey,
+            idempotencyKey: (input.output as { idempotencyKey?: string }).idempotencyKey ?? binanceInput.idempotencyKey ?? '',
             request: binanceInput as Record<string, unknown>,
           },
           progress: {
