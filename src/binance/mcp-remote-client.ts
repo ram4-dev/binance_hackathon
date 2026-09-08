@@ -295,6 +295,24 @@ export class McpBinanceSessionAdapter implements BinanceClient {
   }
 }
 
+
+/** Per-call timeout for remote MCP requests (milliseconds). Agent OS order
+ * execution can take a few seconds; a hung request must fail instead of
+ * stalling the financial task (and the voice confirm) forever. */
+const MCP_CALL_TIMEOUT_MS = 30_000;
+
+function withMcpTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Binance Agent OS request timed out after ${MCP_CALL_TIMEOUT_MS}ms (${label}).`)),
+      MCP_CALL_TIMEOUT_MS,
+    );
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error: unknown) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 function createRemoteMcpSession(config: BinanceConfig): Promise<McpBinanceSession> {
   const url = new URL(config.mcpUrl as string);
   const requestInit = config.mcpToken ? { headers: { Authorization: `Bearer ${config.mcpToken}` } } : {};
@@ -305,14 +323,20 @@ function createRemoteMcpSession(config: BinanceConfig): Promise<McpBinanceSessio
   return Promise.resolve({
     connect: async () => { await client.connect(transport); },
     searchTools: async (category, cursor) => {
-      const result = await client.callTool({
-        name: 'tool_search',
-        arguments: { category, ...(cursor ? { cursor } : {}) },
-      });
+      const result = await withMcpTimeout(
+        client.callTool({
+          name: 'tool_search',
+          arguments: { category, ...(cursor ? { cursor } : {}) },
+        }),
+        'tool_search',
+      );
       return decodeToolSearch(result);
     },
     executeTool: async (toolName, args) =>
-      client.callTool({ name: 'tool_execute', arguments: { toolName, arguments: args } }),
+      withMcpTimeout(
+        client.callTool({ name: 'tool_execute', arguments: { toolName, arguments: args } }),
+        `tool_execute:${toolName}`,
+      ),
     close: async () => client.close(),
   });
 }
