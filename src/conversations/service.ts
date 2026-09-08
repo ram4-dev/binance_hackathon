@@ -683,12 +683,30 @@ export interface WalletConversationService {
                 await publishSpoken(spokenResultMessage(result, updated.language), 'answer');
                 return result;
               }
-              await dependencies.conversations.markPendingTransferUncertain(userId, conversationId);
-              const result = errorResult(errorFromCode('broadcast_uncertain'));
-              await appendServiceMessage(snapshot, userId, result.message, dependencies.conversations);
-              const uncertain = await setProgress(await dependencies.conversations.get(userId, conversationId) ?? snapshot, { phase: 'uncertain', label: result.message });
-              await publish(stateEvent(uncertain));
-              await publishSpoken(spokenResultMessage(result, uncertain.language), 'uncertain');
+                  const classification = classifyBinanceExecutionError(error);
+                  if (classification === 'definitive_rejection') {
+                    // A clean Binance rejection means the order was NOT executed:
+                    // clear the preview and say so, never an ambiguous uncertainty.
+                    await dependencies.conversations.clearPendingTransfer(userId, conversationId);
+                    const reason = error instanceof Error ? error.message : 'Binance rejected the order.';
+                    const result: ConversationTurnResult = {
+                      status: 'error',
+                      code: 'binance_order_rejected',
+                      message: `The Binance order was rejected and was not executed: ${reason}`,
+                    };
+                    await appendServiceMessage(snapshot, userId, result.message, dependencies.conversations);
+                    const updated = await dependencies.conversations.get(userId, conversationId) ?? snapshot;
+                    await publish(stateEvent(updated));
+                    await publishSpoken(spokenResultMessage(result, updated.language), 'result');
+                    return result;
+                  }
+                  await dependencies.conversations.markPendingTransferUncertain(userId, conversationId);
+                  const result = errorResult(errorFromCode('broadcast_uncertain'));
+                  await appendServiceMessage(snapshot, userId, result.message, dependencies.conversations);
+                  const uncertain = await setProgress(await dependencies.conversations.get(userId, conversationId) ?? snapshot, { phase: 'uncertain', label: result.message });
+                  await publish(stateEvent(uncertain));
+                  await publishSpoken(spokenResultMessage(result, uncertain.language), 'uncertain');
+                  return result;
               return result;
             }
 
@@ -1042,10 +1060,23 @@ function sanitizeResult(result: ConversationTurnResult): ConversationTurnResult 
     'no_pending_preview', 'stale_preview', 'recipient_revalidation_required', 'policy_rejected',
     'binance_policy_hold',
     'broadcast_in_progress', 'broadcast_uncertain', 'transaction_receipt_invalid', 'transfer_reverted',
-    'invalid_tool_result', 'wallet_unavailable', 'internal_error',
+    'invalid_tool_result', 'wallet_unavailable', 'internal_error', 'binance_order_rejected',
   ]);
   const code = supported.has(result.code as ConversationErrorCode) ? result.code as ConversationErrorCode : 'internal_error';
   return { status: 'error', code, message: safeErrorMessage(code) };
+}
+
+/**
+ * Classifies an error thrown while executing a confirmed Binance operation.
+ * A clean Binance API rejection (insufficient balance, filter failure, lot
+ * size, ...) means the order was definitively NOT executed; transport-level
+ * failures leave the outcome unknown and must stay `uncertain` (fail-closed).
+ */
+export function classifyBinanceExecutionError(error: unknown): 'definitive_rejection' | 'uncertain' {
+  const message = error instanceof Error ? error.message : String(error);
+  const definitiveRejection =
+    /(insufficient|-2010|notional|filter|lot size|minimum|min_notional|invalid order|precision|-1013|balance is not enough|no money)/iu;
+  return definitiveRejection.test(message) ? 'definitive_rejection' : 'uncertain';
 }
 
 function isToolError(output: unknown): output is Record<string, unknown> {
