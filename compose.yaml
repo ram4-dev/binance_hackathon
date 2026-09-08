@@ -100,6 +100,8 @@
           # LIVEKIT_API_KEY/SECRET, binding keys and OPENAI_API_KEY also come
           # from the git-ignored .env via env_file.
           LIVEKIT_URL: "${LIVEKIT_DOCKER_URL:-ws://livekit:7880}"
+          # The realtime Binance tools need the Agent OS token at runtime (shell-provided).
+          BINANCE_MCP_TOKEN: "${BINANCE_MCP_TOKEN:-}"
           # Same local override as the backend: the git-ignored .env may point
           # DATABASE_URL at host loopback, unreachable from inside the container.
           DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
