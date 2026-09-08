@@ -74,7 +74,11 @@ export function addBinanceDecimals(left: string, right: string): string {
 
 function symbolAllowed(symbol: string, allowedSymbols: string[]): boolean {
   const normalized = normalizeBinanceSymbol(symbol);
-  return allowedSymbols.includes(normalized);
+  if (allowedSymbols.includes(normalized)) return true;
+  // The model may pass the trading pair ("BNBUSDT") instead of the raw asset
+  // ("BNB"): match the base asset against the allowlist in that case.
+  const base = normalized.replace(/(USDT|USDC|FDUSD|BUSD|USDP)$/u, "");
+  return base !== normalized && allowedSymbols.includes(base);
 }
 
 /**
