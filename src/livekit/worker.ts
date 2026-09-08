@@ -65,7 +65,17 @@ export function createLiveKitWorkerRuntime(input?: {
  * programmatic E2E participant (rtc-node) can drive the voice flow. */
 async function waitForParticipantByIdentity(room: { remoteParticipants: Map<string, { identity: string }> }, identity: string): Promise<{ identity: string }> {
   for (let i = 0; i < 240; i++) {
-    const found = [...room.remoteParticipants.values()].find((p) => p.identity === identity);
+    const map = room.remoteParticipants as unknown as Map<string, { identity: string; kind?: unknown }>;
+    if (!map || typeof map.values !== 'function') {
+      console.error('[diag] seam: remoteParticipants shape:', typeof map, Object.keys(room as unknown as object).slice(0, 20).join(','));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+    if (i % 4 === 0) {
+      const entries = [...map.values()].map((p) => `${p.identity}(${String(p.kind)})`);
+      console.error('[diag] seam: participants so far:', entries.join(', ') || '(none)');
+    }
+    const found = [...map.values()].find((p) => p.identity === identity);
     if (found) return found;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -123,7 +133,6 @@ async function runJob(
         contextRenewal: dependencies.contextRenewal,
         binanceDeps,
       });
-      console.error('[diag] job entry: creating realtime tools');
       const tools = createRealtimeTools({
         conversationId: binding.conversationId,
         userId: binding.userId,
