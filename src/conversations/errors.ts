@@ -8,6 +8,7 @@ export type ConversationErrorCode =
   | 'recipient_revalidation_required'
   | 'policy_rejected'
   | 'binance_policy_hold'
+  | 'binance_order_rejected'
   | 'broadcast_in_progress'
   | 'broadcast_uncertain'
   | 'transaction_receipt_invalid'
@@ -25,6 +26,7 @@ export type SafeMessageKey =
   | 'transfer.recipientChanged'
   | 'transfer.policyRejected'
   | 'binance.policyHold'
+  | 'binance.orderRejected'
   | 'transfer.inProgress'
   | 'transfer.uncertain'
   | 'transfer.receiptInvalid'
@@ -63,6 +65,7 @@ export function safeErrorMessage(code: ConversationErrorCode): string {
     case 'recipient_revalidation_required': return 'Recipient changed or is no longer valid; resolve the recipient again.';
     case 'policy_rejected': return 'This transfer does not meet the wallet safety policy.';
     case 'binance_policy_hold': return 'This Binance operation was held by the safety policy.';
+        case 'binance_order_rejected': return 'The Binance order was rejected and was not executed.';
     case 'broadcast_in_progress': return 'The confirmed transfer is already being broadcast.';
     case 'broadcast_uncertain': return 'The broadcast result is uncertain. Check the wallet history before taking another action.';
     case 'transaction_receipt_invalid': return 'The transaction was sent, but its receipt could not be verified.';
@@ -82,6 +85,7 @@ export function errorFromCode(code: ConversationErrorCode, cause?: unknown): Con
                 : code === 'recipient_revalidation_required' ? 'transfer.recipientChanged'
                   : code === 'policy_rejected' ? 'transfer.policyRejected'
                     : code === 'binance_policy_hold' ? 'binance.policyHold'
+                          : code === 'binance_order_rejected' ? 'binance.orderRejected'
                       : code === 'broadcast_in_progress' ? 'transfer.inProgress'
                   : code === 'broadcast_uncertain' ? 'transfer.uncertain'
                     : code === 'transaction_receipt_invalid' ? 'transfer.receiptInvalid'
