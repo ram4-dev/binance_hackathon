@@ -119,6 +119,16 @@ export function evaluateBinanceOrderPolicy(
       message: `The order value exceeds the per-order cap of $${config.maxOrderUsd}, so it is held.`,
     };
   }
+  // Binance BTCUSDT NOTIONAL filter rejects MARKET orders below ~$5; hold them
+  // at the policy layer with an actionable message instead.
+  const MIN_EXCHANGE_NOTIONAL_USD = 5;
+  if (compareBinanceDecimals(input.value, String(MIN_EXCHANGE_NOTIONAL_USD)) < 0) {
+    return {
+      ok: false,
+      code: 'anomaly_hold',
+      message: `The order value is below the Binance exchange minimum (~$${MIN_EXCHANGE_NOTIONAL_USD} USDT per order), so it is held. Ask the user to use a larger amount (at least $10 recommended).`,
+    };
+  }
   const totalUsd = currentDailyUsd ? addBinanceDecimals(currentDailyUsd, input.value) : input.value;
   if (compareBinanceDecimals(totalUsd, String(config.maxDailyUsd)) > 0) {
     return {
@@ -130,11 +140,11 @@ export function evaluateBinanceOrderPolicy(
   return { ok: true };
 }
 
-/**
- * Evaluates the policy for a Binance internal transfer. Transfers move an asset
- * between internal accounts; the only fail-closed rule is the symbol allowlist
- * (an out-of-allowlist asset is held).
- */
+    /**
+     * Evaluates the policy for a Binance internal transfer. Transfers move an asset
+     * between internal accounts; the only fail-closed rule is the symbol allowlist
+     * (an out-of-allowlist asset is held).
+     */
 export function evaluateBinanceTransferPolicy(
   input: BinanceTransferPolicyInput,
   config: BinanceConfig,

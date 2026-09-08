@@ -26,6 +26,17 @@ describe("evaluateBinanceOrderPolicy symbol matching", () => {
     }
   });
 
+  it("holds orders below the exchange minimum notional (~$5)", () => {
+    const decision = evaluateBinanceOrderPolicy({ ...order, quantity: "0.000025", value: "1.96", symbol: "BTCUSDT" }, config, "0");
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.code).toBe("anomaly_hold");
+  });
+
+  it("allows orders at the exchange minimum notional", () => {
+    const decision = evaluateBinanceOrderPolicy({ ...order, quantity: "0.000064", value: "5.01", symbol: "BTCUSDT" }, config, "0");
+    expect(decision.ok).toBe(true);
+  });
+
   it("still holds pairs whose base asset is not allowlisted", () => {
     const decision = evaluateBinanceOrderPolicy({ ...order, symbol: "DOGEUSDT" }, config, "0");
     expect(decision.ok).toBe(false);
