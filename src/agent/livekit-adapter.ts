@@ -9,6 +9,17 @@ import type {
   WalletAgentDefinition,
 } from "./definition.js";
 
+export const BINANCE_READ_ONLY_TOOL_NAMES = [
+  "get_market_quote",
+  "get_binance_balance",
+  "get_binance_history",
+] as const;
+
+export const BINANCE_MONEY_MOVING_TOOL_NAMES = [
+  "place_binance_order",
+  "binance_internal_transfer",
+] as const;
+
 export const READ_ONLY_TOOL_NAMES = [
   "get_networks",
   "list_tokens",
@@ -16,9 +27,11 @@ export const READ_ONLY_TOOL_NAMES = [
   "get_balance",
   "get_history",
 ] as const;
-
+    
 export const NATIVE_PREVIEW_TOOL_NAMES = [
   ...READ_ONLY_TOOL_NAMES,
+  ...BINANCE_READ_ONLY_TOOL_NAMES,
+  ...BINANCE_MONEY_MOVING_TOOL_NAMES,
   "search_recipients",
   "search_user_memory",
   "get_selected_recipient_address",
@@ -26,9 +39,11 @@ export const NATIVE_PREVIEW_TOOL_NAMES = [
   "write_user_memory",
   "send_token",
 ] as const;
-
+    
 const CANCELLABLE_NATIVE_TOOL_NAMES = new Set<string>([
   ...READ_ONLY_TOOL_NAMES,
+  ...BINANCE_READ_ONLY_TOOL_NAMES,
+  ...BINANCE_MONEY_MOVING_TOOL_NAMES,
   "search_recipients",
   "search_user_memory",
   "get_selected_recipient_address",
@@ -106,12 +121,14 @@ function toLiveKitTool(
       : llm.ToolFlag.NONE,
     execute: async (input, execution) => {
       if (
-        definition.name === "send_token" &&
+        (definition.name === "send_token" ||
+          definition.name === "place_binance_order" ||
+          definition.name === "binance_internal_transfer") &&
         input.dryRun !== true
       ) {
         return {
           error: "confirmation_required",
-          message: "A transfer preview must be confirmed before it can be broadcast.",
+          message: "A preview must be confirmed before it can be executed.",
         };
       }
       const output = await definition.execute(input, {

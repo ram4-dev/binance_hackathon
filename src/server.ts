@@ -9,6 +9,8 @@ import { PostgresConversationRepository } from "./conversations/postgres-reposit
 import { createWalletConversationService } from "./conversations/service.js";
 import { readRecipientMemoryConfig } from "./config/env.js";
 import { registerVoiceRoutes } from "./api/voice.js";
+import { registerLiveKitRoutes } from "./api/livekit.js";
+import { registerMeRoutes } from "./api/me.js";
 import { createCoreDependencies } from "./runtime/dependencies.js";
 import { DemoIdentityProvider } from "./auth/identity.js";
 import { FinancialTaskRegistry } from "./conversations/financial-task-registry.js";
@@ -35,11 +37,19 @@ export function buildServer() {
     bodyLimit: 25 * 1024 * 1024,
   });
 
-  app.register(cors, {
-    origin: resolveCorsOrigins(),
-    allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "If-None-Match"],
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-  });
+      app.register(cors, {
+        origin: resolveCorsOrigins(),
+        // If-None-Match/If-Modified-Since back the ETag-based conversation state
+        // reads (GET /v1/conversations/:id/state) used by the voice revision flow.
+        allowedHeaders: [
+          "Content-Type",
+          "Authorization",
+          "Idempotency-Key",
+          "If-None-Match",
+          "If-Modified-Since",
+        ],
+        methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      });
 
   const core = createCoreDependencies();
   app.register(registerHealthRoutes, { wallet: core.walletReads });
@@ -80,6 +90,8 @@ export function buildServer() {
       await core.wallet.close();
     });
   app.register(registerVoiceRoutes);
+  app.register(registerLiveKitRoutes);
+  app.register(registerMeRoutes);
 
   return app;
 }

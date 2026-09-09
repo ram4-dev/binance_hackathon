@@ -5,6 +5,7 @@ import type { RecipientMemoryRuntime } from '../memory/runtime.js';
 import type { ConversationSession } from '../conversations/session-state.js';
 import { getWalletAgentConfig, type WalletAgentConfig } from '../agent/instructions.js';
 import { validateWalletTransferPolicy } from '../agent/definition.js';
+import { isBinancePendingTransfer } from '../contracts/http.js';
 import type { WalletProvider, TransferRequest } from './provider.js';
 
 export { validateWalletTransferPolicy } from '../agent/definition.js';
@@ -126,7 +127,7 @@ async function revalidateRecipient(
 ): Promise<{ error: 'recipient_revalidation_required'; message: string } | undefined> {
   const selected = dependencies.session.recipientMemory?.selectedRecipient;
   const pending = dependencies.session.pendingTransfer;
-  const selection = preview ? selected : pending?.recipientId && pending.recipientVersion
+  const selection = preview ? selected : pending && !isBinancePendingTransfer(pending) && pending.recipientId && pending.recipientVersion
     ? { recipientId: pending.recipientId, version: pending.recipientVersion }
     : undefined;
   if (!selection) return undefined;
@@ -158,7 +159,7 @@ function toTransferRequest(input: SendTokenInput): TransferRequest {
 }
 
 function matchesPending(pending: ConversationSession['pendingTransfer'], input: SendTokenInput): boolean {
-  return Boolean(pending && pending.network === input.network && pending.token === input.token && pending.to === input.to && pending.amount === input.amount && pending.wallet === input.wallet);
+  return Boolean(pending && !isBinancePendingTransfer(pending) && pending.network === input.network && pending.token === input.token && pending.to === input.to && pending.amount === input.amount && pending.wallet === input.wallet);
 }
 
 function normalizeToken(token: string, configuredToken: string): string {

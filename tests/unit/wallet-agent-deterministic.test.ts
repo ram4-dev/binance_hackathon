@@ -183,9 +183,9 @@ describe('handleMessage deterministic paths (no LLM call)', () => {
 
     expect(result.status).toBe('sent');
     if (result.status !== 'sent') return;
-    expect(result.transaction.network).toBe('sepolia');
-    expect(result.transaction.transactionHash).toMatch(/^0x[0-9a-f]{64}$/u);
-    expect(result.transaction.explorerUrl).toContain('sepolia.etherscan.io');
+    expect(result.transaction!.network).toBe('sepolia');
+    expect(result.transaction!.transactionHash).toMatch(/^0x[0-9a-f]{64}$/u);
+    expect(result.transaction!.explorerUrl).toContain('sepolia.etherscan.io');
   });
 
   it('returns recipient revalidation failure without leaving the session uncertain', async () => {

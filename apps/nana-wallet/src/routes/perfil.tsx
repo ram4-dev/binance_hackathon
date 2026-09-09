@@ -8,7 +8,13 @@ import { ConfirmarPlata } from "@/components/ConfirmarPlata";
 import { EmptyState, RouteError, RoutePending } from "@/components/RouteStates";
 import { Button } from "@/components/ui/button";
 import { api, createConversationTurnSender, getErrorMessage, queryKeys } from "@/lib/api";
-import type { Bill, ConfirmableIntent, Contact, ConversationTurnResult } from "@/lib/api-types";
+import {
+  isBinanceTransferPreview,
+  type Bill,
+  type ConfirmableIntent,
+  type Contact,
+  type ConversationTurnResult,
+} from "@/lib/api-types";
 import {
   runExclusiveConversationAction,
   shouldLockAfterConversationResolution,
@@ -378,18 +384,41 @@ function PerfilPage() {
           <p className="text-base leading-snug">{agentTurn.message}</p>
           {agentTurn.status === "confirmation_required" ? (
             <>
-              <dl className="mt-3 space-y-1.5 text-sm sm:text-base">
-                <div className="flex justify-between gap-4">
-                  <dt className="font-bold">Monto</dt>
-                  <dd>
-                    {agentTurn.preview.amount} {agentTurn.preview.token}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="font-bold">Destino</dt>
-                  <dd className="break-all text-right">{agentTurn.preview.recipient}</dd>
-                </div>
-              </dl>
+              {isBinanceTransferPreview(agentTurn.preview) ? (
+                <dl className="mt-3 space-y-1.5 text-sm sm:text-base">
+                  <div className="flex justify-between gap-4">
+                    <dt className="font-bold">Símbolo</dt>
+                    <dd>{agentTurn.preview.symbol}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="font-bold">Cantidad</dt>
+                    <dd>{agentTurn.preview.quantity}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="font-bold">Valor</dt>
+                    <dd>{agentTurn.preview.value}</dd>
+                  </div>
+                  {agentTurn.preview.orderType ? (
+                    <div className="flex justify-between gap-4">
+                      <dt className="font-bold">Tipo de orden</dt>
+                      <dd>{agentTurn.preview.orderType}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              ) : (
+                <dl className="mt-3 space-y-1.5 text-sm sm:text-base">
+                  <div className="flex justify-between gap-4">
+                    <dt className="font-bold">Monto</dt>
+                    <dd>
+                      {agentTurn.preview.amount} {agentTurn.preview.token}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="font-bold">Destino</dt>
+                    <dd className="break-all text-right">{agentTurn.preview.recipient}</dd>
+                  </div>
+                </dl>
+              )}
               <div className="mt-3 grid w-full grid-cols-1">
                 <Button
                   variant="outline"

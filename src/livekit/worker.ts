@@ -12,14 +12,14 @@ import {
   readLiveKitWorkerConfig,
   readWorkerProcessConfig,
   type LiveKitWorkerConfig,
+  type WorkerProcessConfig,
 } from "../config/process.js";
-import { getWalletAgentConfig } from "../agent/instructions.js";
-import type {
-  NativeDecisionRouter,
-  NativeLiveKitAgentInput,
-} from "./create-native-agent.js";
 import { FinancialTaskRegistry } from "../conversations/financial-task-registry.js";
+import { createWalletConversationService } from "../conversations/service.js";
+import { createBinanceToolDependencies } from "../agent/binance-definition.js";
+import { getConfiguredRecipientMemoryService } from "../memory/runtime.js";
 import { createAgentSession } from "./create-agent-session.js";
+import { createRealtimeTools } from "./realtime-tools/index.js";
 import {
   createBindingRpcHandler,
   createRoomConversationGate,
@@ -29,14 +29,6 @@ import {
   createWorkerDependencies,
   type WorkerDependencies,
 } from "../runtime/dependencies.js";
-import { getConfiguredRecipientMemoryRuntime } from "../memory/runtime.js";
-import {
-  VoiceLatencyMilestones,
-  VoiceMetrics,
-} from "../observability/voice-metrics.js";
-import { routeNativeTextTurn } from "./native-text-turn-router.js";
-import { canInspectVoiceMetrics } from "../config/privacy.js";
-import { createVoiceMetricsInspectionHandler } from "./voice-metrics-inspection.js";
 
 export { readLiveKitWorkerConfig } from "../config/process.js";
 export type { LiveKitWorkerConfig } from "../config/process.js";
@@ -44,17 +36,14 @@ export type { LiveKitWorkerConfig } from "../config/process.js";
 export function createLiveKitWorkerRuntime(input?: {
   dependencies?: WorkerDependencies;
   shutdownTimeoutMs?: number;
-  voiceMetrics?: VoiceMetrics;
 }) {
   let acceptingJobs = true;
   let closePromise: Promise<void> | undefined;
   const financialTasks =
     input?.dependencies?.financialTasks ?? new FinancialTaskRegistry();
   const shutdownTimeoutMs = input?.shutdownTimeoutMs ?? 10_000;
-  const voiceMetrics = input?.voiceMetrics ?? new VoiceMetrics();
   return {
     financialTasks,
-    voiceMetrics,
     get acceptingJobs() {
       return acceptingJobs;
     },
@@ -70,18 +59,51 @@ export function createLiveKitWorkerRuntime(input?: {
   };
 }
 
+
+/** Polls the room's remote participants until the given identity joins. Unlike
+ * JobContext.waitForParticipant, this accepts AGENT-kind participants so the
+ * programmatic E2E participant (rtc-node) can drive the voice flow. */
+async function waitForParticipantByIdentity(room: { remoteParticipants: Map<string, { identity: string }> }, identity: string): Promise<{ identity: string }> {
+  for (let i = 0; i < 240; i++) {
+    const map = room.remoteParticipants as unknown as Map<string, { identity: string; kind?: unknown }>;
+    if (!map || typeof map.values !== 'function') {
+      console.error('[diag] seam: remoteParticipants shape:', typeof map, Object.keys(room as unknown as object).slice(0, 20).join(','));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+    if (i % 4 === 0) {
+      const entries = [...map.values()].map((p) => `${p.identity}(${String(p.kind)})`);
+      console.error('[diag] seam: participants so far:', entries.join(', ') || '(none)');
+    }
+    const found = [...map.values()].find((p) => p.identity === identity);
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`E2E participant ${identity} did not join the room within the timeout.`);
+}
+
 async function runJob(
   ctx: JobContext,
-  config: LiveKitWorkerConfig,
+  config: WorkerProcessConfig,
   dependencies: WorkerDependencies,
-  voiceMetrics: VoiceMetrics,
 ): Promise<void> {
   if (!config.publicKey)
     throw new Error("LiveKit worker requires LIVE_VOICE_BINDING_PUBLIC_KEY.");
-  const latency = new VoiceLatencyMilestones(voiceMetrics, config.agentRuntime);
   await ctx.connect(undefined, AutoSubscribe.AUDIO_ONLY);
-  latency.connected();
-  const participant = await ctx.waitForParticipant();
+  // Test seam: the programmatic voice E2E participant comes from @livekit/rtc-node,
+  // which always advertises ParticipantKind.AGENT and would be filtered out by
+  // waitForParticipant. NANA_VOICE_E2E_IDENTITY opts that named participant in
+  // (explicit allowlist; production behavior unchanged when the env is unset).
+  const e2eIdentity = process.env.NANA_VOICE_E2E_IDENTITY?.trim();
+  const participant = e2eIdentity
+    ? await waitForParticipantByIdentity(ctx.room, e2eIdentity)
+    : await ctx.waitForParticipant();
+  // Binance transport for the realtime voice loop. `createBinanceToolDependencies`
+  // resolves the client/usage/config from the environment (fixture by default) and is
+  // shared across every binding in this job. The read-only market tools use the client
+  // directly; the money-moving tools go through the service's injected deps so policy
+  // and confirmation are never bypassed.
+  const binanceDeps = createBinanceToolDependencies();
   const roomConversation = new RoomConversation({
     publicKey: config.publicKey,
     conversations: dependencies.conversations,
@@ -94,43 +116,40 @@ async function runJob(
   let session: ReturnType<typeof createAgentSession>["session"] | undefined;
   let sessionClosed: Promise<void> | undefined;
   let unsubscribeRevisions: (() => void) | undefined;
-  let nativeNarrationInterrupted = false;
-  let voiceMetricsInspectionRegistered = false;
   const gate = createRoomConversationGate({
     conversation: roomConversation,
     startSession: async (binding) => {
-      const native =
-        config.agentRuntime === "native-livekit"
-          ? await createNativeAgentInput(binding, dependencies, async (text) => {
-            const events = await roomConversation.resolvePendingDecision(text);
-            if (events) nativeNarrationInterrupted = false;
-            return events;
-          })
-          : undefined;
-      const created = createAgentSession({
-        conversationService: dependencies.conversationService,
-        binding,
-        runtime: config.agentRuntime,
-        ...(native ? { native } : {}),
+      const memoryService = getConfiguredRecipientMemoryService();
+      // REVIEW FIX V3 (voice path): the voice service is built per binding so its
+      // recipient memory runtime scopes to `binding.sub` — never the demo tenant.
+      // It shares the repository, wallet, and financialTasks with the worker so all
+      // paths (voice tool, text transcript, touch button) arbitrate on the same
+      // claim and emit revisions through the same frontend data topic.
+      const voiceService = createWalletConversationService({
+        conversations: dependencies.conversations,
+        wallet: dependencies.wallet,
+        ...(memoryService ? { memory: { userId: binding.userId, service: memoryService } } : {}),
+        financialTasks: dependencies.financialTasks,
+        contextRenewal: dependencies.contextRenewal,
+        binanceDeps,
       });
+      const tools = createRealtimeTools({
+        conversationId: binding.conversationId,
+        userId: binding.userId,
+        wallet: dependencies.wallet,
+        service: voiceService,
+        conversations: dependencies.conversations,
+        binance: binanceDeps.client,
+        ...(memoryService ? { recipientMemory: memoryService } : {}),
+      });
+      const created = createAgentSession({ tools });
       unsubscribeRevisions = dependencies.financialTasks.subscribe((event) => {
         if (
           !event ||
-          typeof event !== "object"
+          typeof event !== "object" ||
+          (event as { type?: unknown }).type !== "state-revision"
         )
           return;
-        if (
-          config.agentRuntime === "native-livekit" &&
-          !nativeNarrationInterrupted &&
-          (event as { type?: unknown }).type === "spoken-segment"
-        ) {
-          const text = (event as { text?: unknown }).text;
-          if (typeof text === "string" && text.trim()) {
-            created.session.say(text, { addToChatCtx: false });
-          }
-          return;
-        }
-        if ((event as { type?: unknown }).type !== "state-revision") return;
         const revision = (event as { revision?: unknown }).revision;
         if (typeof revision !== "number") return;
         void agentParticipant.publishData(
@@ -148,82 +167,21 @@ async function runJob(
           },
         );
       });
+      console.error('[diag] job entry: creating agent session');
       session = created.session;
       sessionClosed = new Promise<void>((resolve) =>
         created.session.once(AgentSessionEventTypes.Close, () => resolve()),
       );
-      created.session.on(AgentSessionEventTypes.UserInputTranscribed, (event) => {
-        if (event.isFinal) latency.finalTranscript();
-      });
-      created.session.on(AgentSessionEventTypes.MetricsCollected, (event) => {
-        if (event.metrics.type === "llm_metrics") {
-          latency.firstTokenDuration(event.metrics.ttftMs);
-        }
-        if (event.metrics.type === "tts_metrics") {
-          latency.firstAudioDuration(event.metrics.ttfbMs);
-        }
-      });
-      created.session.on(AgentSessionEventTypes.ConversationItemAdded, (event) => {
-        if (event.item.type === "message" && event.item.role === "assistant") {
-          latency.completed();
-        }
-      });
+      console.error('[diag] job entry: awaiting session.start (realtime connect to OpenAI)');
       await created.session.start({
         agent: created.agent,
         room: ctx.room,
         record: false,
-        ...(config.agentRuntime === "native-livekit"
-          ? {
-            inputOptions: {
-              textInputCallback: async (agentSession, event) => {
-                await routeNativeTextTurn({
-                  session: agentSession,
-                  text: event.text,
-                  resolvePendingDecision: (text) =>
-                    roomConversation.resolvePendingDecision(text),
-                  onDecisionRouted: () => {
-                    nativeNarrationInterrupted = false;
-                  },
-                });
-              },
-            },
-          }
-          : {}),
       });
-      if (config.agentRuntime === "native-livekit") {
-        created.session.on(AgentSessionEventTypes.ConversationItemAdded, (event) => {
-          if (
-            event.item.type !== "message" ||
-            (event.item.role !== "user" && event.item.role !== "assistant")
-          ) return;
-          const text = event.item.textContent;
-          if (!text) return;
-          void dependencies.conversationService.appendNativeMessage({
-            conversationId: binding.conversationId,
-            userId: binding.userId,
-            role: event.item.role,
-            text,
-          });
-        });
-      }
       agentParticipant.registerRpcMethod("interrupt_agent", async () => {
-        const interruptedAt = Date.now();
-        if (config.agentRuntime === "native-livekit") {
-          nativeNarrationInterrupted = true;
-        }
         await created.session?.interrupt({ force: true });
-        latency.interrupted(interruptedAt);
         return JSON.stringify({ ok: true });
       });
-      const inspectVoiceMetrics = createVoiceMetricsInspectionHandler({
-        enabled: canInspectVoiceMetrics(),
-        participantIdentity: participant.identity,
-        metrics: voiceMetrics,
-      });
-      if (inspectVoiceMetrics) {
-        agentParticipant.registerRpcMethod("get_voice_metrics", inspectVoiceMetrics);
-        voiceMetricsInspectionRegistered = true;
-      }
     },
   });
   let resolveBinding!: (result: Awaited<ReturnType<typeof gate.bind>>) => void;
@@ -256,61 +214,11 @@ async function runJob(
     clearInterval(leaseRenewal);
     agentParticipant.unregisterRpcMethod("bind_conversation");
     agentParticipant.unregisterRpcMethod("interrupt_agent");
-    if (voiceMetricsInspectionRegistered) {
-      agentParticipant.unregisterRpcMethod("get_voice_metrics");
-    }
     unsubscribeRevisions?.();
     await session?.close();
     await roomConversation.release();
   });
   await sessionClosed;
-}
-
-async function createNativeAgentInput(
-  binding: { conversationId: string; userId: string },
-  dependencies: WorkerDependencies,
-  resolvePendingDecision?: NativeDecisionRouter,
-): Promise<NativeLiveKitAgentInput> {
-  const recipientMemory = getConfiguredRecipientMemoryRuntime();
-  const snapshot = await dependencies.conversations.get(
-    binding.userId,
-    binding.conversationId,
-  );
-  if (!snapshot) {
-    throw new Error("Bound conversation disappeared before native LiveKit startup.");
-  }
-  return {
-    binding,
-    snapshot,
-    context: {
-      conversationId: snapshot.id,
-      userId: snapshot.userId,
-      language: snapshot.language,
-      config: getWalletAgentConfig(),
-      session: {
-        id: snapshot.id,
-        messages: [...snapshot.messages],
-        ...(snapshot.pendingTransfer
-          ? { pendingTransfer: snapshot.pendingTransfer }
-          : {}),
-        ...(snapshot.recipientMemory
-          ? { recipientMemory: snapshot.recipientMemory }
-          : {}),
-        ...(snapshot.transferResolutionState
-          ? { transferResolutionState: snapshot.transferResolutionState }
-          : {}),
-        ...(snapshot.lastTransactionHash
-          ? { lastTransactionHash: snapshot.lastTransactionHash }
-          : {}),
-      },
-      wallet: dependencies.wallet,
-      ...(recipientMemory
-        ? { recipientMemory }
-        : {}),
-    },
-    conversationService: dependencies.conversationService,
-    ...(resolvePendingDecision ? { resolvePendingDecision } : {}),
-  };
 }
 
 const agent = defineAgent({
@@ -322,7 +230,7 @@ const agent = defineAgent({
       shutdownTimeoutMs: config.shutdownTimeoutMs,
     });
     ctx.addShutdownCallback(runtime.close);
-    await runJob(ctx, config, dependencies, runtime.voiceMetrics);
+    await runJob(ctx, config, dependencies);
   },
 });
 
@@ -336,6 +244,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       wsURL: config.url,
       apiKey: config.apiKey,
       apiSecret: config.apiSecret,
+      // Explicit agent dispatch: the room join token requests `agentName`, so a
+      // self-hosted LiveKit server must register the worker under the same name.
+      agentName: config.agentName,
       drainTimeout: config.shutdownTimeoutMs,
       shutdownProcessTimeout: config.shutdownTimeoutMs,
     }),

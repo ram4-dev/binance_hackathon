@@ -1,5 +1,5 @@
 import type { ConversationSnapshot } from "./types.js";
-import type { TransactionResult } from "../contracts/http.js";
+import { isBinancePendingTransfer, type TransactionResult } from "../contracts/http.js";
 
 export type ConversationActivity =
   "idle" | "working" | "awaiting_confirmation" | "verifying" | "uncertain" | "request_waiting";
@@ -69,13 +69,15 @@ export function projectConversationState(
               snapshot.progress?.label ?? "The transfer could not be verified.",
           }
         : undefined;
-  const transaction = snapshot.lastTransactionHash
-    ? {
-        network: snapshot.pendingTransfer?.network ?? "sepolia",
-        transactionHash: snapshot.lastTransactionHash,
-        explorerUrl: `https://sepolia.etherscan.io/tx/${snapshot.lastTransactionHash}`,
-      }
-    : undefined;
+      const transaction = snapshot.lastTransactionHash
+        ? {
+            network: snapshot.pendingTransfer && !isBinancePendingTransfer(snapshot.pendingTransfer)
+              ? snapshot.pendingTransfer.network
+              : "sepolia",
+            transactionHash: snapshot.lastTransactionHash,
+            explorerUrl: `https://sepolia.etherscan.io/tx/${snapshot.lastTransactionHash}`,
+          }
+        : undefined;
   return {
     id: snapshot.id,
     mode: snapshot.mode,

@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 import type { Queryable, DatabaseClient } from "../db/client.js";
-import type { PendingTransfer } from "../contracts/http.js";
+import { isBinancePendingTransfer, type PendingTransfer } from "../contracts/http.js";
 import type {
   AcquireLiveLeaseResult,
   ConversationRepository,
@@ -90,15 +90,17 @@ function asSnapshot(
         ? transfer.status
         : undefined,
     lastTransactionHash: transactionHash,
-    ...(transactionHash
-      ? {
-          transaction: {
-            network: transfer?.pending_transfer.network ?? "sepolia",
-            transactionHash,
-            explorerUrl: `https://sepolia.etherscan.io/tx/${transactionHash}`,
-          },
-        }
-      : {}),
+        ...(transactionHash
+          ? {
+              transaction: {
+                network: transfer?.pending_transfer && !isBinancePendingTransfer(transfer.pending_transfer)
+                  ? transfer.pending_transfer.network
+                  : "sepolia",
+                transactionHash,
+                explorerUrl: `https://sepolia.etherscan.io/tx/${transactionHash}`,
+              },
+            }
+          : {}),
     messages,
     ...(row.pending_interpretation ? { pendingInterpretation: row.pending_interpretation } : {}),
     ...(row.summary ? { summary: row.summary } : {}),
@@ -242,8 +244,8 @@ export class PostgresConversationRepository implements ConversationRepository {
             state.rows[0].revision,
             status,
             JSON.stringify(snapshot.pendingTransfer),
-            snapshot.pendingTransfer.recipientId ?? null,
-            snapshot.pendingTransfer.recipientVersion ?? null,
+            isBinancePendingTransfer(snapshot.pendingTransfer) ? null : snapshot.pendingTransfer.recipientId ?? null,
+            isBinancePendingTransfer(snapshot.pendingTransfer) ? null : snapshot.pendingTransfer.recipientVersion ?? null,
             snapshot.lastTransactionHash ?? null,
           ],
         );
@@ -307,8 +309,8 @@ export class PostgresConversationRepository implements ConversationRepository {
           conversationId,
           userId,
           JSON.stringify(transfer),
-          transfer.recipientId ?? null,
-          transfer.recipientVersion ?? null,
+          isBinancePendingTransfer(transfer) ? null : transfer.recipientId ?? null,
+          isBinancePendingTransfer(transfer) ? null : transfer.recipientVersion ?? null,
         ],
       );
       if (!inserted.rows[0]) throw new Error("conversation_not_found");

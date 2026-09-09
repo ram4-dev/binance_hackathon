@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildWalletAgentInstructions, type WalletAgentConfig } from './instructions.js';
+import { createBinanceToolsFromEnv } from './binance-definition.js';
 import type { ConversationLanguage } from '../conversations/language.js';
 import { invalidateSelectedRecipient, type ConversationSession } from '../conversations/session-state.js';
 import type { RecipientMemoryRuntime } from '../memory/runtime.js';
@@ -7,7 +8,7 @@ import { createRecipientMemoryTools } from '../memory/tools.js';
 import { isValidEvmAddress } from '../memory/address.js';
 import type { WalletProvider, TransferRequest } from '../wallet/provider.js';
 import { decodeMcpText } from '../wdk/mcp-client.js';
-import { transactionResultSchema, transferPreviewSchema, type TransferPreview } from '../contracts/http.js';
+import { transactionResultSchema, walletTransferPreviewSchema, type WalletTransferPreview } from '../contracts/http.js';
 
 export type WalletAgentContext = {
   conversationId: string;
@@ -87,7 +88,7 @@ export function normalizeWalletToken(token: string, configuredToken: string): st
 export function canonicalizeTransferPreview(
   input: SendTokenInput,
   output: unknown,
-): TransferPreview | null {
+): WalletTransferPreview | null {
   const candidate = decodePreviewCandidate(output);
   if (!candidate || candidate.preview !== true) return null;
   let estimatedFee: string | undefined;
@@ -99,7 +100,7 @@ export function canonicalizeTransferPreview(
     }
   }
   if (!estimatedFee) return null;
-  const canonical = transferPreviewSchema.safeParse({
+  const canonical = walletTransferPreviewSchema.safeParse({
     network: input.network,
     token: input.token,
     recipient: input.to,
@@ -156,6 +157,7 @@ export function createWalletAgentDefinition(): WalletAgentDefinition {
     tools: (context) => [
       ...createWalletOperations(context),
       ...createRecipientMemoryOperations(context),
+      ...createBinanceToolsFromEnv(),
     ],
   };
 }

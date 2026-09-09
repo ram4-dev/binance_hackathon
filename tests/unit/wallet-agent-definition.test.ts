@@ -47,6 +47,11 @@ describe('wallet agent definition', () => {
       'get_balance',
       'get_history',
       'send_token',
+      'get_market_quote',
+      'get_binance_balance',
+      'place_binance_order',
+      'binance_internal_transfer',
+      'get_binance_history',
     ]);
     expect(definition.tools(input).find((tool) => tool.name === 'send_token')?.inputSchema.safeParse({
       network: 'sepolia', token: 'USDT', to: '0x1234567890123456789012345678901234567890', amount: '10', wallet: 'agent-demo', dryRun: true,

@@ -1,22 +1,25 @@
 import { http, HttpResponse, passthrough } from "msw";
 
-import type {
-  AgendaEvent,
-  ApiEnvelope,
-  Bill,
-  Contact,
-  CreateAgendaEventInput,
-  CreateContactInput,
-  EmptyResponse,
-  ErrCode,
-  Me,
-  MovementsPage,
-  PaymentIntent,
-  PaymentResult,
-  ConversationTurnResult,
-  TransferIntentInput,
-  UpdateContactInput,
-  WalletSummary,
+import {
+  isBinanceTransferPreview,
+  type AgendaEvent,
+  type ApiEnvelope,
+  type Bill,
+  type BinanceTransferPreview,
+  type Contact,
+  type CreateAgendaEventInput,
+  type CreateContactInput,
+  type EmptyResponse,
+  type ErrCode,
+  type Me,
+  type MovementsPage,
+  type PaymentIntent,
+  type PaymentResult,
+  type ConversationTurnResult,
+  type TransferIntentInput,
+  type TransferPreview,
+  type UpdateContactInput,
+  type WalletSummary,
 } from "@/lib/api-types";
 import { shouldUseLiveAgentBackend } from "@/lib/live-agent";
 import { classifySessionSubmission } from "@/lib/session-resolution";
@@ -250,7 +253,10 @@ type StoredIntent = {
 
 const intents = new Map<string, StoredIntent>();
 const confirmedRequests = new Map<string, PaymentResult>();
-const agentConversations = new Map<string, { pendingConfirmation: boolean }>();
+const agentConversations = new Map<
+  string,
+  { pendingConfirmation: boolean; pendingPreview?: TransferPreview }
+>();
 
 function formatArs(amount: string) {
   return `$ ${new Intl.NumberFormat("es-AR").format(Number(amount))}`;
@@ -578,10 +584,18 @@ export const handlers = [
       const submission = classifySessionSubmission(body.message, true);
       if (submission.kind === "resolution") {
         conversation.pendingConfirmation = false;
+        const pendingPreview = conversation.pendingPreview;
+        delete conversation.pendingPreview;
         if (submission.message === "cancelar la transferencia") {
           return HttpResponse.json<ConversationTurnResult>({
             status: "cancelled",
             message: "Transfer cancelled.",
+          });
+        }
+        if (pendingPreview && isBinanceTransferPreview(pendingPreview)) {
+          return HttpResponse.json<ConversationTurnResult>({
+            status: "sent",
+            message: "Listo, la orden de Binance se ejecutó.",
           });
         }
         return HttpResponse.json<ConversationTurnResult>({
@@ -602,6 +616,44 @@ export const handlers = [
         },
         { status: 422 },
       );
+    }
+
+    const proposesBinance = [
+      "binance",
+      "comprá",
+      "comprar",
+      "compra",
+      "orden",
+      "btc",
+      "bnb",
+      "eth",
+      "spot",
+      "funding",
+    ].some((word) => normalized.includes(word));
+    if (proposesBinance) {
+      const holdsBinanceAsset = ["usdt", "doge"].some((word) => normalized.includes(word));
+      if (holdsBinanceAsset) {
+        return HttpResponse.json<ConversationTurnResult>({
+          status: "error",
+          message:
+            "Binance USDT no está en la lista permitida, así que la operación queda en pausa.",
+          code: "binance_policy_hold",
+        });
+      }
+      const binancePreview: BinanceTransferPreview = {
+        venue: "binance",
+        symbol: "BNB",
+        quantity: "0.1",
+        value: "50.10",
+        orderType: "MARKET",
+      };
+      conversation.pendingConfirmation = true;
+      conversation.pendingPreview = binancePreview;
+      return HttpResponse.json<ConversationTurnResult>({
+        status: "confirmation_required",
+        message: "Preparé la orden de Binance. Revisala antes de confirmar.",
+        preview: binancePreview,
+      });
     }
 
     const proposesTransfer = ["sofi", "sofía", "mandar", "transfer", "pagar", "regalo"].some(

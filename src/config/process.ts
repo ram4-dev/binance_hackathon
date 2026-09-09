@@ -1,7 +1,6 @@
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import { z } from "zod";
 import { readLiveKitPrivacyConfig } from "./livekit.js";
-import { readElevenLabsApiKey } from "./privacy.js";
 
 const uuid = z.string().uuid();
 
@@ -47,7 +46,6 @@ export type ApiProcessConfig = {
 export type WorkerProcessConfig = LiveKitWorkerConfig & {
   databaseUrl: string;
   demoUserId: string;
-  elevenLabsApiKey: string;
 };
 
 export type LiveKitAgentRuntime = "service-adapter" | "native-livekit";
@@ -69,6 +67,14 @@ export type LiveKitWorkerConfig = {
   publicKey?: string;
   shutdownTimeoutMs: number;
   agentRuntime: LiveKitAgentRuntime;
+  agentName: string;
+};
+
+export type LiveKitConnectionConfig = {
+  url: string;
+  apiKey: string;
+  apiSecret: string;
+  agentName: string;
 };
 
 export function readLiveKitAgentRuntime(
@@ -97,24 +103,46 @@ export function readLiveKitWorkerConfig(
       "LiveKit worker requires LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET.",
     );
   }
-  const shutdownTimeoutMs = positiveInteger(
-    environment.LIVEKIT_SHUTDOWN_TIMEOUT_MS,
-    "LIVEKIT_SHUTDOWN_TIMEOUT_MS",
-    10_000,
-  );
-  const agentRuntime = readLiveKitAgentRuntime(environment);
-  if (agentRuntime === "native-livekit") {
-    required(environment, "OPENCODE_GO_API_KEY");
-  }
-  return {
-    url,
-    apiKey,
-    apiSecret,
-    publicKey,
-    shutdownTimeoutMs,
-    agentRuntime,
-  };
-}
+      const shutdownTimeoutMs = positiveInteger(
+        environment.LIVEKIT_SHUTDOWN_TIMEOUT_MS,
+        "LIVEKIT_SHUTDOWN_TIMEOUT_MS",
+        10_000,
+      );
+      const agentRuntime = readLiveKitAgentRuntime(environment);
+      if (agentRuntime === "native-livekit") {
+        required(environment, "OPENCODE_GO_API_KEY");
+      }
+      const agentName = environment.LIVEKIT_AGENT_NAME?.trim() || "nani-agent";
+      return {
+        url,
+        apiKey,
+        apiSecret,
+        publicKey,
+        shutdownTimeoutMs,
+        agentRuntime,
+        agentName,
+      };
+    }
+
+    export function readLiveKitConnectionConfig(
+      environment: NodeJS.ProcessEnv = process.env,
+    ): LiveKitConnectionConfig {
+      readLiveKitPrivacyConfig(environment);
+      const url = environment.LIVEKIT_URL?.trim();
+      const apiKey = environment.LIVEKIT_API_KEY?.trim();
+      const apiSecret = environment.LIVEKIT_API_SECRET?.trim();
+      if (!url || !apiKey || !apiSecret) {
+        throw new Error(
+          "LiveKit connection requires LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET.",
+        );
+      }
+      return {
+        url,
+        apiKey,
+        apiSecret,
+        agentName: environment.LIVEKIT_AGENT_NAME?.trim() || "nani-agent",
+      };
+    }
 
 export function readApiProcessConfig(
   environment: NodeJS.ProcessEnv = process.env,
@@ -156,11 +184,17 @@ export function readWorkerProcessConfig(
   const databaseUrl = required(environment, "DATABASE_URL");
   const demoUserId = required(environment, "DEMO_USER_ID");
   if (!uuid.safeParse(demoUserId).success) throw new Error("DEMO_USER_ID must be a UUID for the worker.");
-  const elevenLabsApiKey = readElevenLabsApiKey(environment);
-  if (!elevenLabsApiKey) {
-    throw new Error("ELEVENLABS_API_KEY or ELEVEN_LABS is required for this process.");
+  // OPENAI_API_KEY is the canonical name; OPEN_AI_API_KEY (Secret Vault
+  // naming) is accepted as a fallback alias so either provides it.
+  if (!environment["OPENAI_API_KEY"]?.trim() && !environment["OPEN_AI_API_KEY"]?.trim()) {
+    throw new Error("OPENAI_API_KEY is required for the worker.");
   }
-  return { ...liveKit, publicKey, databaseUrl, demoUserId, elevenLabsApiKey };
+  return {
+    ...liveKit,
+    publicKey,
+    databaseUrl,
+    demoUserId,
+  };
 }
 
 export const readApiConfig = readApiProcessConfig;

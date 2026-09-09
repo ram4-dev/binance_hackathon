@@ -5,7 +5,11 @@ import { useState } from "react";
 import { AgenteAvatar } from "@/components/agente/AgenteAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { ConversationState, ConversationTurnResult } from "@/lib/api-types";
+import {
+  isBinanceTransferPreview,
+  type ConversationState,
+  type ConversationTurnResult,
+} from "@/lib/api-types";
 import type { LiveVoiceState } from "./voice/live-voice-reducer";
 
 export type AgentScreenProps = {
@@ -239,38 +243,72 @@ export function AgentScreen(props: AgentScreenProps) {
           <section className="surface-card p-4">
             <p>{props.turn.message}</p>
             {props.turn.status === "confirmation_required" ? (
-              <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
-                <dt className="font-bold">Monto</dt>
-                <dd className="text-right">
-                  {props.turn.preview.amount} {props.turn.preview.token}
-                </dd>
-                <dt className="font-bold">Destino</dt>
-                <dd className="truncate text-right">{props.turn.preview.recipient}</dd>
-                <dt className="font-bold">Red</dt>
-                <dd className="text-right">{props.turn.preview.network}</dd>
-                <dt className="font-bold">Costo</dt>
-                <dd className="text-right">{props.turn.preview.estimatedFee}</dd>
-              </dl>
+              isBinanceTransferPreview(props.turn.preview) ? (
+                <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
+                  <dt className="font-bold">Símbolo</dt>
+                  <dd className="text-right">{props.turn.preview.symbol}</dd>
+                  <dt className="font-bold">Cantidad</dt>
+                  <dd className="text-right">{props.turn.preview.quantity}</dd>
+                  <dt className="font-bold">Valor</dt>
+                  <dd className="text-right">{props.turn.preview.value}</dd>
+                  {props.turn.preview.orderType ? (
+                    <>
+                      <dt className="font-bold">Tipo de orden</dt>
+                      <dd className="text-right">{props.turn.preview.orderType}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              ) : (
+                <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
+                  <dt className="font-bold">Monto</dt>
+                  <dd className="text-right">
+                    {props.turn.preview.amount} {props.turn.preview.token}
+                  </dd>
+                  <dt className="font-bold">Destino</dt>
+                  <dd className="truncate text-right">{props.turn.preview.recipient}</dd>
+                  <dt className="font-bold">Red</dt>
+                  <dd className="text-right">{props.turn.preview.network}</dd>
+                  <dt className="font-bold">Costo</dt>
+                  <dd className="text-right">{props.turn.preview.estimatedFee}</dd>
+                </dl>
+              )
             ) : null}
           </section>
         ) : null}
         {pending ? (
           <section className="surface-card p-4" aria-label="Vista previa de transferencia">
             <p className="text-base font-extrabold">Revisá esta transferencia</p>
-            <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
-              <dt className="font-bold">Monto</dt>
-              <dd className="text-right">
-                {pending.amount} {pending.token}
-              </dd>
-              <dt className="font-bold">Destino</dt>
-              <dd className="truncate text-right" title={pending.recipient}>
-                {pending.recipient}
-              </dd>
-              <dt className="font-bold">Red</dt>
-              <dd className="text-right">{pending.network}</dd>
-              <dt className="font-bold">Costo</dt>
-              <dd className="text-right">{pending.estimatedFee}</dd>
-            </dl>
+            {isBinanceTransferPreview(pending) ? (
+              <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
+                <dt className="font-bold">Símbolo</dt>
+                <dd className="text-right">{pending.symbol}</dd>
+                <dt className="font-bold">Cantidad</dt>
+                <dd className="text-right">{pending.quantity}</dd>
+                <dt className="font-bold">Valor</dt>
+                <dd className="text-right">{pending.value}</dd>
+                {pending.orderType ? (
+                  <>
+                    <dt className="font-bold">Tipo de orden</dt>
+                    <dd className="text-right">{pending.orderType}</dd>
+                  </>
+                ) : null}
+              </dl>
+            ) : (
+              <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
+                <dt className="font-bold">Monto</dt>
+                <dd className="text-right">
+                  {pending.amount} {pending.token}
+                </dd>
+                <dt className="font-bold">Destino</dt>
+                <dd className="truncate text-right" title={pending.recipient}>
+                  {pending.recipient}
+                </dd>
+                <dt className="font-bold">Red</dt>
+                <dd className="text-right">{pending.network}</dd>
+                <dt className="font-bold">Costo</dt>
+                <dd className="text-right">{pending.estimatedFee}</dd>
+              </dl>
+            )}
           </section>
         ) : null}
         {pending ? (

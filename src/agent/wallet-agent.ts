@@ -19,6 +19,11 @@ import {
   sendTokenInputSchema,
   type SendTokenInput,
 } from './definition.js';
+import {
+  binanceOrderInputSchema,
+  binanceTransferInputSchema,
+  canonicalizeBinancePreview,
+} from './binance-definition.js';
 import { getWdkTools } from './wdk-tools.js';
 import type { WalletProvider } from '../wallet/provider.js';
 import {
@@ -46,7 +51,12 @@ import { isValidEvmAddress } from '../memory/address.js';
 import { getConfiguredRecipientMemoryRuntime, type RecipientMemoryRuntime } from '../memory/runtime.js';
 import { resolveTransferRecipient, type RecipientMemoryToolPort } from './recipient-resolution.js';
 import { hasExplicitTransferAddress } from './recipient-intent.js';
-import type { ConversationTurnResult, PendingTransfer } from '../contracts/http.js';
+    import {
+      isBinancePendingTransfer,
+      isBinanceTransferPreview,
+      type ConversationTurnResult,
+      type PendingTransfer,
+    } from '../contracts/http.js';
 import type { ConversationLanguage } from '../conversations/language.js';
 
 export { canonicalizeTransferPreview } from './definition.js';
@@ -114,6 +124,12 @@ function normalizeSendTokenInput(input: SendTokenInput, configuredToken: string)
 
 const guardedSendTokenErrorSchema = z.object({
   error: z.enum(['confirmation_required', 'recipient_revalidation_required', 'policy_rejected']),
+  message: z.string().trim().min(1),
+});
+
+const guardedBinanceErrorSchema = z.object({
+  error: z.enum(['confirmation_required', 'policy_hold']),
+  code: z.string().optional(),
   message: z.string().trim().min(1),
 });
 
@@ -241,6 +257,7 @@ function pendingMatches(session: ConversationSession, input: SendTokenInput): bo
   const p = session.pendingTransfer;
   return (
     !!p &&
+    !isBinancePendingTransfer(p) &&
     p.network === input.network &&
     p.token === input.token &&
     p.to === input.to &&
@@ -300,7 +317,7 @@ export function buildGuardedTools(
           message: 'Recipient changed or is no longer valid; resolve the recipient again.',
         };
       }
-      const mustRevalidate = normalizedInput.dryRun ? selected : (pending?.recipientId ? {
+      const mustRevalidate = normalizedInput.dryRun ? selected : (pending && !isBinancePendingTransfer(pending) && pending.recipientId ? {
         recipientId: pending.recipientId,
         version: pending.recipientVersion!,
       } : undefined);
@@ -343,14 +360,92 @@ export function buildGuardedTools(
     },
   });
 
-  return {
-    ...baseTools,
-    ...(normalizedGetBalance ? { get_balance: normalizedGetBalance } : {}),
-    send_token: guardedSendToken,
-  };
-}
+      return {
+        ...baseTools,
+        ...guardedBinanceTools(baseTools, session),
+        ...(normalizedGetBalance ? { get_balance: normalizedGetBalance } : {}),
+        send_token: guardedSendToken,
+      };
+    }
 
-function createMemoryAgentTools(raw: ReturnType<typeof createRecipientMemoryTools>): Record<string, Tool> {
+    /**
+     * Wraps the Binance money-moving tools so a `dryRun:false` call can only reach
+     * the transport when it matches a confirmed Binance preview pending in the
+     * session. This mirrors the `send_token` guard: a model cannot execute an order
+     * or transfer without an explicit user decision.
+     */
+    function guardedBinanceTools(baseTools: Record<string, Tool>, session: ConversationSession): Record<string, Tool> {
+      const wrapped: Record<string, Tool> = {};
+      const moneyMoving = ['place_binance_order', 'binance_internal_transfer'] as const;
+      for (const name of moneyMoving) {
+        const base = baseTools[name];
+        if (!base?.execute) continue;
+        wrapped[name] = tool({
+          description: base.description,
+          inputSchema: base.inputSchema,
+          execute: async (input, options) => {
+            const parsed = input as { dryRun: boolean; idempotencyKey: string };
+            if (parsed.dryRun) {
+              try {
+                return await base.execute!(input, options);
+              } catch (error) {
+                console.error('[diag] dryRun tool threw:', error);
+                throw error;
+              }
+            }
+            const pending = session.pendingTransfer;
+            const operation = name === 'place_binance_order' ? 'order' : 'internal_transfer';
+            const pendingMatches =
+                !!pending &&
+                isBinancePendingTransfer(pending) &&
+                pending.operation === operation;
+              // The model is not asked to carry the idempotency key (schemas made it
+              // optional): inject the pending preview's own key at execution time.
+              if (!pendingMatches) {
+                return {
+                  error: 'confirmation_required',
+                  message: 'Refusing to execute: no matching confirmed Binance preview in the current session.',
+                };
+              }
+              const executeInput = { ...(input as Record<string, unknown>), idempotencyKey: parsed.idempotencyKey ?? pending.idempotencyKey };
+              return base.execute!(executeInput, options);
+          },
+        });
+      }
+      return wrapped;
+    }
+    
+    async function buildSessionTools(
+      options: HandleMessageOptions,
+      session: ConversationSession,
+      recipientMemory: RecipientMemoryRuntime | undefined,
+      agentConfig: WalletAgentConfig,
+      rawMemoryTools?: ReturnType<typeof createRecipientMemoryTools>,
+    ): Promise<Record<string, Tool>> {
+      const definition = options.walletProvider
+        ? createWalletAgentDefinition()
+        : undefined;
+      const baseTools = definition && options.walletProvider
+        ? toAiSdkTools(definition, {
+          conversationId: session.id,
+          userId: recipientMemory?.userId ?? process.env.DEMO_USER_ID ?? '',
+          language: options.language ?? 'en',
+          config: agentConfig,
+          session,
+          wallet: options.walletProvider,
+          ...(recipientMemory ? { recipientMemory } : {}),
+          ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+        })
+        : await getWdkTools();
+      return buildGuardedTools(
+        definition ? baseTools : { ...baseTools, ...(rawMemoryTools ? createMemoryAgentTools(rawMemoryTools) : {}) },
+        session,
+        recipientMemory,
+        agentConfig,
+      );
+    }
+
+    function createMemoryAgentTools(raw: ReturnType<typeof createRecipientMemoryTools>): Record<string, Tool> {
   return {
     search_recipients: tool({
       description: 'Search current-user recipient names and descriptions. Results never include addresses.',
@@ -474,8 +569,7 @@ export async function handleMessage(
       };
     }
     try {
-      const baseTools = await getWdkTools();
-      const tools = buildGuardedTools(baseTools, session, recipientMemory);
+      const tools = await buildSessionTools(options, session, recipientMemory, getWalletAgentConfig(), rawMemoryTools);
       return executeConfirmedTransfer(
         session,
         claim.transfer,
@@ -532,25 +626,8 @@ export async function handleMessage(
   const definition = options.walletProvider
     ? createWalletAgentDefinition()
     : undefined;
-  const baseTools = definition && options.walletProvider
-    ? toAiSdkTools(definition, {
-      conversationId: session.id,
-      userId: recipientMemory?.userId ?? '',
-      language: options.language ?? 'en',
-      config: agentConfig,
-      session,
-      wallet: options.walletProvider,
-      ...(recipientMemory ? { recipientMemory } : {}),
-      ...(options.abortSignal ? { signal: options.abortSignal } : {}),
-    })
-    : await getWdkTools();
-  const tools = buildGuardedTools(
-    definition ? baseTools : { ...baseTools, ...(rawMemoryTools ? createMemoryAgentTools(rawMemoryTools) : {}) },
-    session,
-    recipientMemory,
-    agentConfig,
-  );
-
+  const tools = await buildSessionTools(options, session, recipientMemory, agentConfig, rawMemoryTools);
+    
   if (isDeterministicAgentRuntime() && !options.model) {
     return handleDeterministicTurn(userText, session, tools, agentConfig, options.language ?? 'en');
   }
@@ -622,13 +699,50 @@ export async function handleMessage(
       return { status: 'confirmation_required', message: result.text, preview };
     }
 
-    const message = 'The wallet returned an invalid transfer preview.';
-    appendMessage(session, { role: 'assistant', content: message });
-    return { status: 'error', message, code: 'invalid_tool_result' };
-  }
+        const message = 'The wallet returned an invalid transfer preview.';
+        appendMessage(session, { role: 'assistant', content: message });
+        return { status: 'error', message, code: 'invalid_tool_result' };
+      }
 
-  return { status: 'answer', message: result.text };
-}
+      const binanceCalls = result.toolResults.filter((r) =>
+        r.toolName === 'place_binance_order' || r.toolName === 'binance_internal_transfer',
+      );
+      const lastBinanceCall = binanceCalls[binanceCalls.length - 1];
+      if (lastBinanceCall) {
+        const output = lastBinanceCall.output as unknown;
+        const guardedError = guardedBinanceErrorSchema.safeParse(output);
+        if (guardedError.success) {
+          const code = guardedError.data.error === 'confirmation_required'
+            ? 'confirmation_required'
+            : 'binance_policy_hold';
+          return { status: 'error', message: guardedError.data.message, code };
+        }
+        console.error('[diag] lastBinanceCall output:', JSON.stringify(output)?.slice(0, 400));
+        const preview = canonicalizeBinancePreview(output);
+        console.error('[diag] canonicalize result:', JSON.stringify(preview)?.slice(0, 300));
+        if (preview) {
+          const orderParsed = binanceOrderInputSchema.safeParse(lastBinanceCall.input);
+          const transferParsed = binanceTransferInputSchema.safeParse(lastBinanceCall.input);
+          const operation = orderParsed.success ? 'order' : transferParsed.success ? 'internal_transfer' : null;
+          if (operation) {
+            const request = lastBinanceCall.input as Record<string, unknown>;
+            setPendingTransfer(session, {
+              venue: 'binance',
+              operation,
+              preview,
+              idempotencyKey: String(request.idempotencyKey ?? ''),
+              request,
+            });
+            return { status: 'confirmation_required', message: result.text, preview };
+          }
+        }
+        const message = 'The Binance tool returned an invalid preview.';
+        appendMessage(session, { role: 'assistant', content: message });
+        return { status: 'error', message, code: 'invalid_tool_result' };
+      }
+    
+      return { status: 'answer', message: result.text };
+    }
 
 async function executeConfirmedTransfer(
   session: ConversationSession,
@@ -637,13 +751,16 @@ async function executeConfirmedTransfer(
   transactionReceiptWaiter: TransactionReceiptWaiter = defaultTransactionReceiptWaiter,
   abortSignal?: AbortSignal,
 ): Promise<ConversationTurnResult> {
+  if (isBinancePendingTransfer(pending)) {
+    return executeConfirmedBinance(session, pending, tools);
+  }
   if (!pending.preview || !tools.send_token?.execute) {
     releasePendingTransferClaim(session);
     const message = 'There is no pending transfer to confirm.';
     appendMessage(session, { role: 'assistant', content: message });
     return { status: 'error', message, code: 'no_pending_preview' };
   }
-
+    
   const input = {
     network: pending.network,
     token: pending.token,
@@ -719,10 +836,60 @@ async function executeConfirmedTransfer(
     return { status: 'sent', message, transaction };
   }
 
-  return markBroadcastUncertain(session);
-}
+      return markBroadcastUncertain(session);
+    }
 
-function markTransactionReceiptInvalid(
+    async function executeConfirmedBinance(
+      session: ConversationSession,
+      pending: Extract<NonNullable<ConversationSession['pendingTransfer']>, { venue: 'binance' }>,
+      tools: Record<string, Tool>,
+    ): Promise<ConversationTurnResult> {
+      const toolName = pending.operation === 'order' ? 'place_binance_order' : 'binance_internal_transfer';
+      const binanceTool = tools[toolName];
+      if (!binanceTool?.execute) {
+        releasePendingTransferClaim(session);
+        const message = 'The Binance tool is unavailable to execute the confirmed operation.';
+        appendMessage(session, { role: 'assistant', content: message });
+        return { status: 'error', message, code: 'wallet_unavailable' };
+      }
+      const input = { ...pending.request, dryRun: false };
+      let output: unknown;
+      try {
+        output = await binanceTool.execute(input, toolCallOptions);
+      } catch {
+        return markBinanceUncertain(session);
+      }
+      const guardedError = guardedBinanceErrorSchema.safeParse(output);
+      if (guardedError.success) {
+        if (guardedError.data.error === 'confirmation_required') {
+          releasePendingTransferClaim(session);
+        } else {
+          clearPendingTransfer(session);
+        }
+        appendMessage(session, { role: 'assistant', content: guardedError.data.message });
+        return {
+          status: 'error',
+          message: guardedError.data.message,
+          code: guardedError.data.error === 'confirmation_required' ? 'confirmation_required' : 'binance_policy_hold',
+        };
+      }
+      clearPendingTransfer(session);
+      const message = pending.operation === 'order'
+        ? 'Binance order executed.'
+        : 'Binance transfer completed.';
+      appendMessage(session, { role: 'assistant', content: message });
+      return { status: 'sent', message };
+    }
+
+    function markBinanceUncertain(session: ConversationSession): ConversationTurnResult {
+      markPendingTransferUncertain(session);
+      const message =
+        'The Binance result is uncertain. Check the Binance history before taking another action.';
+      appendMessage(session, { role: 'assistant', content: message });
+      return { status: 'error', message, code: 'broadcast_uncertain' };
+    }
+    
+    function markTransactionReceiptInvalid(
   session: ConversationSession,
   transactionHash: string,
   reason: string,

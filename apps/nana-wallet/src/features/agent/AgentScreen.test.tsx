@@ -182,4 +182,69 @@ describe("AgentScreen financial projection", () => {
     expect(css).toContain(".agent-stage--speaking .nani-avatar-frame");
     expect(css).toContain(".agent-stage--reconnecting .nani-avatar-frame");
   });
+
+  it("shows a Binance venue preview with symbol, quantity, value and order type", () => {
+    const binancePreview = {
+      venue: "binance" as const,
+      symbol: "BNB",
+      quantity: "0.1",
+      value: "50.10",
+      orderType: "MARKET" as const,
+      previewId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    };
+    render(
+      <AgentScreen
+        voiceState={{ phase: "idle" }}
+        liveMode={false}
+        conversationState={{
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          mode: "live",
+          revision: 8,
+          pendingTransfer: binancePreview,
+          activity: "awaiting_confirmation",
+        }}
+        text=""
+        onTextChange={vi.fn()}
+        onTypedSubmit={vi.fn()}
+        onAvatarPress={vi.fn()}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Revisá esta transferencia")).toBeInTheDocument();
+    expect(screen.getByText("BNB")).toBeInTheDocument();
+    expect(screen.getByText("0.1")).toBeInTheDocument();
+    expect(screen.getByText("50.10")).toBeInTheDocument();
+    expect(screen.getByText("MARKET")).toBeInTheDocument();
+    expect(screen.queryByText("Destino")).not.toBeInTheDocument();
+  });
+
+  it("shows a Binance policy hold message", () => {
+    render(
+      <AgentScreen
+        voiceState={{ phase: "idle" }}
+        liveMode={false}
+        conversationState={null}
+        turn={{
+          status: "error",
+          message:
+            "Binance USDT no está en la lista permitida, así que la operación queda en pausa.",
+          code: "binance_policy_hold",
+        }}
+        text=""
+        onTextChange={vi.fn()}
+        onTypedSubmit={vi.fn()}
+        onAvatarPress={vi.fn()}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "Binance USDT no está en la lista permitida, así que la operación queda en pausa.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

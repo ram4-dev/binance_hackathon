@@ -1,5 +1,5 @@
 import type { Tool } from 'ai';
-import type { TransactionResult, TransferPreview } from '../contracts/http.js';
+import type { TransactionResult, WalletTransferPreview } from '../contracts/http.js';
 import { defaultTransactionReceiptWaiter } from '../wdk/transaction-receipt.js';
 import type {
   BroadcastOutcome,
@@ -120,7 +120,7 @@ export class WdkWalletProvider implements WalletProvider {
     };
   }
 
-  public async previewTransfer(request: TransferRequest): Promise<TransferPreview> {
+  public async previewTransfer(request: TransferRequest): Promise<WalletTransferPreview> {
     const result = record(unwrap(await this.call('send_token', { ...request, dryRun: true })), 'WDK preview');
     const estimatedFee = result.estimatedFeeFormatted ?? result.estimatedFee;
     if (typeof estimatedFee !== 'string' || estimatedFee.trim().length === 0) throw new Error('Wallet provider returned no fee evidence.');
