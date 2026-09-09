@@ -69,10 +69,10 @@ await room.localParticipant.publishTrack(track, { source: m.TrackSource.SOURCE_M
 
 // wait for the agent participant
 let agent;
-for (let i = 0; i < 40; i++) {
+for (let i = 0; i < 120; i++) {
   agent = Object.values(room.remoteParticipants ?? {})[0];
   if (agent) break;
-  await new Promise(r => setTimeout(r, 250));
+  await new Promise(r => setTimeout(r, 500));
 }
 console.log('[e2e] agent present:', agent?.identity ?? 'NOT YET');
 
